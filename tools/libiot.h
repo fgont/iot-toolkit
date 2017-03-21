@@ -657,6 +657,7 @@ struct iface_data{
 	unsigned int		type;
 	unsigned int		flags;
 	int					fd;
+	int					fd2;
 	unsigned int		pending_write_f;
 	void				*pending_write_data;
 	unsigned int		pending_write_size;
