@@ -128,7 +128,7 @@ struct prefixv4_entry	prefix;
 char					*charstart, *charend, *lastcolon;
 unsigned int			nsleep;
 int						sel;
-fd_set					sset, rset, wset, eset;
+fd_set					srset, swset, seset, rset, wset, eset;
 struct timeval			curtime, pcurtime, lastprobe;
 struct tm				pcurtimetm;
 unsigned int			retrans=0;
@@ -494,8 +494,14 @@ print_tddp_packet(sendbuff, nsendbuff);
 		}
 
 
-		FD_ZERO(&sset);
-		FD_SET(idata.fd, &sset);
+		FD_ZERO(&srset);
+		FD_ZERO(&swset);
+		FD_ZERO(&seset);
+
+		FD_SET(idata.fd, &swset);
+		FD_SET(idata.fd2, &srset);
+		FD_SET(idata.fd, &seset);
+		FD_SET(idata.fd2, &seset);
 
 		lastprobe.tv_sec= 0;	
 		lastprobe.tv_usec=0;
@@ -505,9 +511,9 @@ print_tddp_packet(sendbuff, nsendbuff);
 		   That is, we give responses enough time to come back
 		 */
 		while(!end_f){
-			rset= sset;
-			wset= sset;
-			eset= sset;
+			rset= srset;
+			wset= swset;
+			eset= seset;
 
 			if(!donesending_f){
 				/* This is the retransmission timer */
@@ -524,7 +530,7 @@ print_tddp_packet(sendbuff, nsendbuff);
 				Check for readability and exceptions. We only check for writeability if there is pending data
 				to send.
 			 */
-			if((sel=select(idata.fd+1, &rset, (idata.pending_write_f?&wset:NULL), &eset, &timeout)) == -1){
+			if((sel=select(idata.fd2+1, &rset, (idata.pending_write_f?&wset:NULL), &eset, &timeout)) == -1){
 				if(errno == EINTR){
 					continue;
 				}
@@ -553,7 +559,7 @@ print_tddp_packet(sendbuff, nsendbuff);
 			}
 
 
-			if(sel && FD_ISSET(idata.fd, &rset)){
+			if(sel && FD_ISSET(idata.fd2, &rset)){
 				/* XXX: Process response packet */
 
 				if( (nreadbuff = recvfrom(idata.fd, readbuff, sizeof(readbuff), 0, (struct sockaddr *)&sockaddr_from, &sockaddrfrom_len)) == -1){
@@ -610,6 +616,12 @@ print_tddp_packet(sendbuff, nsendbuff);
 
 
 			if(FD_ISSET(idata.fd, &eset)){
+				if(idata.verbose_f)
+					puts("iot-scaner: Found exception on descriptor");
+
+				exit(EXIT_FAILURE);
+			}
+			if(FD_ISSET(idata.fd2, &eset)){
 				if(idata.verbose_f)
 					puts("iot-scaner: Found exception on descriptor");
 
