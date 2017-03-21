@@ -479,7 +479,7 @@ puts("Antes de chequear que hago");
 puts("This is what I'm going to send");
 print_tddp_packet(sendbuff, nsendbuff);
 
-		if(idata.dstaddr_f){
+		if(!idata.dstaddr_f){
 			puts("Must specify destination address");
 			exit(EXIT_FAILURE);
 		}
