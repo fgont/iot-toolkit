@@ -51,7 +51,7 @@
 #include <unistd.h>
 #include <openssl/md5.h>
 
-#include "iot-scan.h"
+#include "iot-tddp.h"
 #include "iot-toolkit.h"
 #include "libiot.h"
 
@@ -132,16 +132,6 @@ fd_set					srset, swset, seset, rset, wset, eset;
 struct timeval			curtime, pcurtime, lastprobe;
 struct tm				pcurtimetm;
 unsigned int			retrans=0;
-char 					TP_LINK_SMART_DISCOVER[]="{\"system\":{\"get_sysinfo\":null},\"emeter\":{\"get_realtime\":null}}";
-char 					TP_LINK_IP_CAMERA_DISCOVER[]={0x02, 0x03, 0x01, 0x00, 0x00, 0x00, 0x00, 0x20, 0x00, 0x00, 0x17, 0x00, \
-						                               0x07, 0xd8, 0xa1, 0x4f, 0xc2, 0x90, 0x98, 0x93, 0xec, 0x5b, 0x80, 0x5e, \
-						                               0xfa, 0xe2, 0x06, 0xd5, 0x63, 0x86, 0xb6, 0xdc, 0x3c, 0x8a, 0xff, 0x48, \
-						                               0xce, 0x6c, 0xbd, 0x97, 0xb7, 0x1c, 0x21, 0xe9, 0xbd, 0x59, 0x30, 0xd7, \
-						                               0x19, 0xd1, 0x22, 0x77, 0x6b, 0xd9, 0x43, 0x19, 0xd8, 0x87, 0x9f, 0xbb};
-
-char					TP_LINK_IP_CAMERA_RESPONSE[]= {0x02, 0x03, 0x02, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, \
-						                               0x17, 0x00, 0x72, 0xa9, 0xa2, 0x32, 0xad, 0xd8, 0x65, 0xae, \
-						                               0x78, 0x40, 0xad, 0x62, 0x08, 0xf9, 0x34, 0x16};
 
 int main(int argc, char **argv){
 	extern char				*optarg;
@@ -153,9 +143,6 @@ int main(int argc, char **argv){
 	const int				on=1;
 	struct sockaddr_in		sockaddr_in, sockaddr_from, sockaddr_to;
 	socklen_t				sockaddrfrom_len;
-	struct json				*json1, *json2, *json3;
-	struct json_value		json_value;
-	char					*alias, *dev_name, *type, *model;
 	struct	tddp_hdr		*tddp_hdr;
 
 /*
@@ -217,8 +204,8 @@ tddp_id = "0001"
 #  0x15 returns \x01\x00\x00\x00\x00\x00\x00\x00
 #  0x18 returns 1
 */
-	char		username[]="admin";
-	char		password[]="admin";
+/*	char		username[]="admin";
+	char		password[]="admin";*/
 	uint8_t		tddp_version=2;
 
 /*
@@ -247,7 +234,7 @@ tddp_code = "01"
 tddp_reply = "00"
 */
 	uint8_t		tddp_replyinfo= 0x00;
-	uint16_t	tddp_pktid= 0x0001
+	uint16_t	tddp_pktid= 0x0100;
 	uint8_t		tddp_subtype= 0x00;
     MD5_CTX		mdContext;
 
@@ -275,6 +262,7 @@ tddp_reply = "00"
 
 	init_iface_data(&idata);
 
+puts("Antes de proesar opciones");
 
 	while((r=getopt_long(argc, argv, shortopts, longopts, NULL)) != -1) {
 		option= r;
@@ -370,6 +358,8 @@ tddp_reply = "00"
 		} /* switch */
 	} /* while(getopt) */
 
+puts("Termine proc opc");
+
 	/*
 	    XXX: This is rather ugly, but some local functions need to check for verbosity, and it was not warranted
 	    to pass &idata as an argument
@@ -401,6 +391,7 @@ tddp_reply = "00"
 		exit(EXIT_FAILURE);
 	}
 
+puts("Antes de chequear que hago");
 
 	if(scan_local_f){
 		/* If an interface was specified, we select an IPv4 address from such interface */
@@ -442,17 +433,17 @@ tddp_reply = "00"
 		}
 
 		/* Second (receive) socket */
-		if( (idata.fd=socket(AF_INET, SOCK_DGRAM, 0)) == -1){
+		if( (idata.fd2=socket(AF_INET, SOCK_DGRAM, 0)) == -1){
 			puts("Could not create socket");
 			exit(EXIT_FAILURE);
 		}
 
 		memset(&sockaddr_in, 0, sizeof(sockaddr_in));
 		sockaddr_in.sin_family= AF_INET;
-		sockaddr_in.sin_port= htohs(TDDP_RECEIVE_PORT);  /* Allow Sockets API to set an ephemeral port */
+		sockaddr_in.sin_port= htons(TDDP_RECEIVE_PORT);  /* Allow Sockets API to set an ephemeral port */
 		sockaddr_in.sin_addr= idata.srcaddr;
 
-		if(bind(idata.fd, (struct sockaddr *) &sockaddr_in, sizeof(sockaddr_in)) == -1){
+		if(bind(idata.fd2, (struct sockaddr *) &sockaddr_in, sizeof(sockaddr_in)) == -1){
 			puts("Error bind()ing socket to local address");
 			exit(EXIT_FAILURE);
 		}
@@ -562,7 +553,7 @@ print_tddp_packet(sendbuff, nsendbuff);
 			if(sel && FD_ISSET(idata.fd2, &rset)){
 				/* XXX: Process response packet */
 
-				if( (nreadbuff = recvfrom(idata.fd, readbuff, sizeof(readbuff), 0, (struct sockaddr *)&sockaddr_from, &sockaddrfrom_len)) == -1){
+				if( (nreadbuff = recvfrom(idata.fd2, readbuff, sizeof(readbuff), 0, (struct sockaddr *)&sockaddr_from, &sockaddrfrom_len)) == -1){
 					perror("iot-scan: ");
 					exit(EXIT_FAILURE);
 				}
@@ -824,7 +815,7 @@ void free_host_entries(struct host_list *hlist){
 
 
 void	print_tddp_packet(void *ptr, unsigned int len){
-	struct tddp_hdr tddp_hdr;
+	struct tddp_hdr *tddp_hdr;
 	unsigned int 	i;
 	tddp_hdr= ptr;
 

@@ -128,5 +128,5 @@ char TP_LINK_SET_RELAY_OFF[]="{\"system\":{\"set_relay_state\":{\"state\":0}}}";
 char TP_LINK_PING_PONG[]="{\"DoSme\":{\"err_code\":-1,\"err_msg\":\"module not support\"}}";
 
 unsigned int	is_command_valid(char *);
-
+void			print_tddp_packet(void *, unsigned int);
 

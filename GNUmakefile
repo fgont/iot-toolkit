@@ -67,7 +67,7 @@ iot-tl-plug: $(SRCPATH)/iot-tl-plug.c $(SRCPATH)/iot-tl-plug.h $(SRCPATH)/iot-to
 	$(CC) $(CPPFLAGS) $(CFLAGS) -o iot-tl-plug $(SRCPATH)/iot-tl-plug.c $(LIBS) $(LDFLAGS)
 
 iot-tddp: $(SRCPATH)/iot-tddp.c $(SRCPATH)/iot-tddp.h $(SRCPATH)/iot-toolkit.h $(LIBS) $(SRCPATH)/libiot.h
-	$(CC) $(CPPFLAGS) $(CFLAGS) -o iot-tddp $(SRCPATH)/iot-tl-plug.c $(LIBS) $(LDFLAGS) $(LDFLAGS_SSL)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -o iot-tddp $(SRCPATH)/iot-tddp.c $(LIBS) $(LDFLAGS) $(LDFLAGS_SSL)
 
 libiot.o: $(SRCPATH)/libiot.c $(SRCPATH)/libiot.h
 	$(CC) $(CPPFLAGS) $(CFLAGS) -c -o libiot.o $(SRCPATH)/libiot.c

@@ -106,7 +106,7 @@ union my6_addr{
 struct tddp_hdr{
 	uint8_t		version;
 	uint8_t		type;
-	uint8_t		code
+	uint8_t		code;
 	uint8_t		replyinfo;
 	uint32_t	pktlength;
 	uint16_t	pktid;
