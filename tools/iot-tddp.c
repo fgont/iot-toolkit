@@ -475,7 +475,7 @@ puts("Antes de chequear que hago");
 		/* Now compute MD5 checksum */
 	    MD5_Init(&mdContext);
         MD5_Update(&mdContext, sendbuff, nsendbuff);
-
+	    MD5_Final (tddp_hdr->md5_digest ,&mdContext);
 puts("This is what I'm going to send");
 print_tddp_packet(sendbuff, nsendbuff);
 
