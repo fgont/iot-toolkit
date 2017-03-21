@@ -795,7 +795,8 @@ struct json_value{
 #define				IP_LIMITED_MULTICAST	"255.255.255.255"
 #define				NULL_STRING	""
 #define				TP_LINK_SMART_PORT	9999
-#define				MAX_TP_COMMAND_LENGTH	4000
+/* XXX Should use different constant */
+#define				MAX_TP_COMMAND_LENGTH	10000
 #define				TP_LINK_IP_CAMERA_TDDP_PORT	1068
 
 
