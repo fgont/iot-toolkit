@@ -573,6 +573,7 @@ int main(int argc, char **argv){
 		if(geteuid()){
 			puts("iot-tl-plug needs superuser privileges to run");
 			exit(EXIT_FAILURE);
+		}
 	}
 	else{
 		release_privileges();
@@ -1578,7 +1579,7 @@ XXX This should later allow to just specify local scan and automatically choose 
 				/* XXX: SEND PROBE PACKET */
 				nsendbuff= Strnlen(json, MAX_TP_COMMAND_LENGTH);
 				memcpy(sendbuff, json, nsendbuff);
-				tp_link_encrypt((unsigned char *)sendbuff, nsendbuff);
+				tp_link_crypt((unsigned char *)sendbuff, nsendbuff);
 
 				if( sendto(idata.fd, sendbuff, nsendbuff, 0, (struct sockaddr *) &sockaddr_to, sizeof(sockaddr_to)) == -1){
 					perror("iot-tl-plug: ");
