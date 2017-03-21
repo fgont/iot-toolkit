@@ -50,6 +50,8 @@
 #include <setjmp.h>
 #include <unistd.h>
 #include <openssl/md5.h>
+#include <openssl/des.h>
+#include <openssl/err.h>
 
 #include "iot-tddp.h"
 #include "iot-toolkit.h"
@@ -144,7 +146,7 @@ int main(int argc, char **argv){
 	struct sockaddr_in		sockaddr_in, sockaddr_from, sockaddr_to;
 	socklen_t				sockaddrfrom_len;
 	struct	tddp_hdr		*tddp_hdr;
-
+	unsigned int			npayload=0;
 /*
 ## Packet Type
 # 0x01	SET_USR_CFG - set configuration information
@@ -204,8 +206,21 @@ tddp_id = "0001"
 #  0x15 returns \x01\x00\x00\x00\x00\x00\x00\x00
 #  0x18 returns 1
 */
-	char		username[]="admin";
-	char		password[]="admin";
+
+	char				username_admin[]="admin";
+	char				password_admin[]="admin";
+	char				*username;
+	char				*password;
+	unsigned int		nusername;
+	unsigned int		npassword;
+	char				preparekey[BUFFER_SIZE];
+	char				keydigest[MD5_DIGEST_LENGTH];
+    DES_cblock			des_key[8];
+    DES_key_schedule 	key;
+/*
+    DES_cblock			ciphertext;
+    DES_cblock			buf;
+*/
 	uint8_t		tddp_version=2;
 
 /*
@@ -214,7 +229,7 @@ tddp_id = "0001"
 # 0x03	CMD_SPE_OPR - special configuration commands
 # 0x04	HEART_BEAT -  the heartbeat package
 */
-	uint8_t		tddp_type= 0x02; /* GETSYSINF*/
+	uint8_t		tddp_type= 0x03; /* GETSYSINF*/
 
 /*
 ## Code Request Type
@@ -234,22 +249,32 @@ tddp_code = "01"
 tddp_reply = "00"
 */
 	uint8_t		tddp_replyinfo= 0x00;
-	uint16_t	tddp_pktid= 0x0100;
+	uint16_t	tddp_pktid= 0x0020;
 	uint8_t		tddp_subtype= 0x00;
     MD5_CTX		mdContext;
 
 	static struct option longopts[] = {
 		{"interface", required_argument, 0, 'i'},
+		{"pktid", required_argument, 0, 'I'},
+		{"code", required_argument, 0, 'c'},
 		{"dst-address", required_argument, 0, 'd'},
 		{"local-scan", no_argument, 0, 'L'},
 		{"retrans", required_argument, 0, 'x'},
 		{"timeout", required_argument, 0, 'O'},
+		{"subtype", required_argument, 0, 't'},
+		{"type", required_argument, 0, 'T'},
+		{"user", required_argument, 0, 'u'},
+		{"src-port", required_argument, 0, 'o'},
+		{"dst-port", required_argument, 0, 'a'},
+		{"password", required_argument, 0, 'p'},
+		{"replyinfo", required_argument, 0, 'r'},
 		{"verbose", no_argument, 0, 'v'},
+		{"version", required_argument, 0, 'V'},
 		{"help", no_argument, 0, 'h'},
 		{0, 0, 0,  0 }
 	};
 
-	char shortopts[]= "i:d:Lx:O:vh";
+	char shortopts[]= "i:I:c:d:Lx:O:t:T:u:o:a:p:r:vV:h";
 
 	char option;
 
@@ -262,7 +287,16 @@ tddp_reply = "00"
 
 	init_iface_data(&idata);
 
-puts("Antes de proesar opciones");
+	/* Set defaults */
+	username= username_admin;
+	password= password_admin;
+	tddp_type= 0x03; /* GETSYSINF*/
+	tddp_code=0x01;
+	tddp_replyinfo= 0x00;
+	tddp_pktid= 0x0020;
+	tddp_subtype= 0x00;
+
+
 
 	while((r=getopt_long(argc, argv, shortopts, longopts, NULL)) != -1) {
 		option= r;
@@ -273,6 +307,38 @@ puts("Antes de proesar opciones");
 				idata.iface[IFACE_LENGTH-1]=0;
 				idata.ifindex= if_nametoindex(idata.iface);
 				idata.iface_f=TRUE;
+				break;
+
+			case 'I':
+				tddp_pktid=atoi(optarg);
+				break;
+
+			case 'c':
+				tddp_code=atoi(optarg);
+				break;
+
+			case 't':
+				tddp_subtype=atoi(optarg);
+				break;
+
+			case 'T':
+				tddp_type=atoi(optarg);
+				break;
+
+			case 'V':
+				tddp_version=atoi(optarg);
+				break;
+
+			case 'u':
+				username= optarg;
+				break;
+
+			case 'p':
+				password= optarg;
+				break;
+
+			case 'r':
+				tddp_replyinfo=atoi(optarg);
 				break;
 
 			case 'd':	/* IPv6 Destination Address/Prefix */
@@ -337,6 +403,16 @@ puts("Antes de proesar opciones");
 				idata.local_retrans=atoi(optarg);
 				break;
 
+			case 'o':	/* UDP Source Port */
+				idata.srcport= atoi(optarg);
+				idata.srcport_f= 1;
+				break;
+
+			case 'a':	/* UDP Destination Port */
+				idata.dstport= atoi(optarg);
+				idata.dstport_f= 1;
+				break;
+
 			case 'O':
 				idata.local_timeout=atoi(optarg);
 				break;
@@ -358,7 +434,25 @@ puts("Antes de proesar opciones");
 		} /* switch */
 	} /* while(getopt) */
 
-puts("Termine proc opc");
+
+	nusername= Strnlen(username, BUFFER_SIZE);
+	npassword= Strnlen(password, BUFFER_SIZE);
+
+	if( (nusername+npassword+2) > BUFFER_SIZE){
+		puts("Username/password too long");
+		exit(EXIT_FAILURE);
+	}
+
+	strncpy(preparekey, username, nusername);
+	strncpy( (char *)preparekey + nusername, password, npassword);
+	/* Preparekey now contains the concatenated username and assword */
+
+    MD5_Init(&mdContext);
+    MD5_Update(&mdContext, preparekey, nusername+npassword);
+	MD5_Final((unsigned char *)keydigest, &mdContext);
+
+	memcpy(des_key, keydigest, 8);
+
 
 	/*
 	    XXX: This is rather ugly, but some local functions need to check for verbosity, and it was not warranted
@@ -451,6 +545,7 @@ puts("Antes de chequear que hago");
 		memset(&sockaddr_to, 0, sizeof(sockaddr_to));
 		sockaddr_to.sin_family= AF_INET;
 		sockaddr_to.sin_port= htons(TDDP_SERVICE_PORT);
+		sockaddr_to.sin_addr= idata.dstaddr;		
 
 		memset(&sockaddr_from, 0, sizeof(sockaddr_from));
 		sockaddr_from.sin_family= AF_INET;
@@ -468,18 +563,41 @@ puts("Antes de chequear que hago");
 
 		charptr= (char *) (sendbuff + sizeof(struct tddp_hdr));;
 		/* here we should insert any data */
+		npayload= charptr- sendbuff - sizeof(struct tddp_hdr);
 
-		nsendbuff= charptr - (sendbuff+sizeof(struct tddp_hdr));
-		tddp_hdr->pktlength= htonl( (uint32_t)nsendbuff);
+		/* XXX check bounds */
+		for(i=0; i <  (npayload%8); i++){
+			*charptr= 0x00;
+			charptr++;
+		}
+
+
+		nsendbuff= charptr- sendbuff;
+		npayload= nsendbuff - sizeof(struct tddp_hdr);
+		tddp_hdr->pktlength= htonl( (uint32_t)npayload);
+
+		if(npayload){
+			ERR_clear_error();
+
+			if(DES_set_key(des_key, &key) < 0){
+		        puts("Error setting up DES key");
+				exit(EXIT_FAILURE);
+			}
+
+			for(i=0; i< (npayload/8); i++){
+			    DES_ecb_encrypt( (DES_cblock *) charptr, (DES_cblock *) charptr, &key, 1);
+				charptr= charptr+8;
+			}
+		}
 
 		/* Now compute MD5 checksum */
 	    MD5_Init(&mdContext);
         MD5_Update(&mdContext, sendbuff, nsendbuff);
-
+	    MD5_Final (tddp_hdr->md5_digest ,&mdContext);
 puts("This is what I'm going to send");
 print_tddp_packet(sendbuff, nsendbuff);
 
-		if(idata.dstaddr_f){
+		if(!idata.dstaddr_f){
 			puts("Must specify destination address");
 			exit(EXIT_FAILURE);
 		}
@@ -490,6 +608,7 @@ print_tddp_packet(sendbuff, nsendbuff);
 		FD_ZERO(&seset);
 
 		FD_SET(idata.fd, &swset);
+		FD_SET(idata.fd, &srset);
 		FD_SET(idata.fd2, &srset);
 		FD_SET(idata.fd, &seset);
 		FD_SET(idata.fd2, &seset);
@@ -551,6 +670,7 @@ print_tddp_packet(sendbuff, nsendbuff);
 
 
 			if(sel && FD_ISSET(idata.fd2, &rset)){
+puts("Reading from socket");
 				/* XXX: Process response packet */
 
 				if( (nreadbuff = recvfrom(idata.fd2, readbuff, sizeof(readbuff), 0, (struct sockaddr *)&sockaddr_from, &sockaddrfrom_len)) == -1){
@@ -563,6 +683,33 @@ print_tddp_packet(sendbuff, nsendbuff);
 					exit(EXIT_FAILURE);
 				}
 
+printf("Read %u bytes from %s\n", (unsigned int)nreadbuff, pv4addr);
+				print_tddp_packet(readbuff, nreadbuff);
+			}
+
+			if(sel && FD_ISSET(idata.fd, &rset)){
+puts("Reading from socket");
+				/* XXX: Process response packet */
+
+				if( (nreadbuff = recvfrom(idata.fd, readbuff, sizeof(readbuff), 0, (struct sockaddr *)&sockaddr_from, &sockaddrfrom_len)) == -1){
+					perror("iot-scan: ");
+					exit(EXIT_FAILURE);
+				}
+
+				if(inet_ntop(AF_INET, &(sockaddr_from.sin_addr), pv4addr, sizeof(pv4addr)) == NULL){
+					perror("iot-scan: ");
+					exit(EXIT_FAILURE);
+				}
+
+				/* There's data to be desencrypted */
+				if(nreadbuff> sizeof(struct tddp_hdr)){
+					for(i=0; i< ((nreadbuff-sizeof(struct tddp_hdr))/8); i++){
+					    DES_ecb_encrypt( (DES_cblock *)(readbuff+ sizeof(struct tddp_hdr) + i * 8), \
+						(DES_cblock *)(readbuff+ sizeof(struct tddp_hdr) + i * 8), &key, 0);
+					}
+				}
+
+printf("Read %u bytes from %s\n", (unsigned int)nreadbuff, pv4addr);
 				print_tddp_packet(readbuff, nreadbuff);
 			}
 
@@ -573,19 +720,10 @@ print_tddp_packet(sendbuff, nsendbuff);
 			}
 
 			if(!donesending_f && idata.pending_write_f && FD_ISSET(idata.fd, &wset)){
+puts("Going to write");
 				idata.pending_write_f=FALSE;
 
 				/* XXX: SEND PROBE PACKET */
-				nsendbuff= Strnlen(TP_LINK_SMART_DISCOVER, MAX_TP_COMMAND_LENGTH);
-				memcpy(sendbuff, TP_LINK_SMART_DISCOVER, nsendbuff);
-				tp_link_crypt((unsigned char *)sendbuff, nsendbuff);
-/*
-				if( sendto(idata.fd, encrypted, sizeof(encrypted), 0, (struct sockaddr *) &sockaddr_to, sizeof(sockaddr_to)) == -1){
-					perror("iot-scan: ");
-					exit(EXIT_FAILURE);
-				}
-*/
-
 				if( sendto(idata.fd, sendbuff, nsendbuff, 0, (struct sockaddr *) &sockaddr_to, sizeof(sockaddr_to)) == -1){
 					perror("iot-scan: ");
 					exit(EXIT_FAILURE);
@@ -819,6 +957,9 @@ void	print_tddp_packet(void *ptr, unsigned int len){
 	unsigned int 	i;
 	tddp_hdr= ptr;
 
+	if(len < sizeof(struct tddp_hdr))
+		return;
+
 	printf("Version: %02x   Type: %02x   Subtype: %02x  Code: %02x  ReplyInfo: %02x   PktLength: %08x"\
 			"   PktId: %04x\nMD5 Digest: ",\
 			tddp_hdr->version, tddp_hdr->type, tddp_hdr->subtype, tddp_hdr->code, tddp_hdr->replyinfo, \
@@ -829,5 +970,7 @@ void	print_tddp_packet(void *ptr, unsigned int len){
 	}
 
 	puts("");
+	puts("Payload:");
+	dump_text((char *) ptr + sizeof(struct tddp_hdr), len- sizeof(struct tddp_hdr));
 }
 
