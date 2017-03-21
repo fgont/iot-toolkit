@@ -1018,9 +1018,6 @@ XXX This should later allow to just specify local scan and automatically choose 
 		readbuff[nreadbuff]= 0x00;
 
 		tp_link_decrypt((unsigned char *)readbuff, nreadbuff);
-		printf("Response:\n%s\n\n", readbuff);
-		printf("Lei %lu bytes\n", nreadbuff);
-		
 		exit(EXIT_SUCCESS);
 	}
 	else if(command_f){
@@ -1406,9 +1403,6 @@ XXX This should later allow to just specify local scan and automatically choose 
 		readbuff[nreadbuff]= 0x00;
 
 		tp_link_decrypt((unsigned char *)readbuff, nreadbuff);
-		printf("Response:\n%s\n\n", readbuff);
-		printf("Lei %lu bytes\n", nreadbuff);
-		
 		exit(EXIT_SUCCESS);
 	}
 	else if(json_f){
