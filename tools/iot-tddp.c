@@ -451,6 +451,7 @@ puts("Antes de chequear que hago");
 		memset(&sockaddr_to, 0, sizeof(sockaddr_to));
 		sockaddr_to.sin_family= AF_INET;
 		sockaddr_to.sin_port= htons(TDDP_SERVICE_PORT);
+		sockaddr_to.sin_addr= idata.dstaddr;		
 
 		memset(&sockaddr_from, 0, sizeof(sockaddr_from));
 		sockaddr_from.sin_family= AF_INET;
@@ -551,6 +552,7 @@ print_tddp_packet(sendbuff, nsendbuff);
 
 
 			if(sel && FD_ISSET(idata.fd2, &rset)){
+puts("Reading from socket");
 				/* XXX: Process response packet */
 
 				if( (nreadbuff = recvfrom(idata.fd2, readbuff, sizeof(readbuff), 0, (struct sockaddr *)&sockaddr_from, &sockaddrfrom_len)) == -1){
@@ -573,6 +575,7 @@ print_tddp_packet(sendbuff, nsendbuff);
 			}
 
 			if(!donesending_f && idata.pending_write_f && FD_ISSET(idata.fd, &wset)){
+puts("Going to write");
 				idata.pending_write_f=FALSE;
 
 				/* XXX: SEND PROBE PACKET */
