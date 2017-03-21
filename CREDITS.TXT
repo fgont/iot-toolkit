@@ -1,0 +1,31 @@
+CREDITS
+-------
+
+** Contributors **
+
+The following people sent patches that were incorporated into this release
+of the toolkit:
+
+    [None]
+
+
+** Package maintainers **
+
+Availability of packages for different operating systems makes it easier for
+users to install and update the toolkit, and for the toolkit to integrate
+better with the operating systems.
+
+These are the maintainers for each of the different packages:
+
+    [TBD]
+
+** Troubleshooting/Debugging **
+
+Spotting bugs in networking tools can be tricky, since at times they only show
+up in specific network scenarios.
+
+The following indviduals provided great help in identifying bugs in the
+toolkit (thus leading to fixes and improvements):
+
+    [None]
+

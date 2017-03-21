@@ -1,0 +1,3 @@
+SI6 Networks IoT Toolkit v1.0 (Jan)
+   * Initial release during Troopers 2017 (www.troopers.de)
+
