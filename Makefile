@@ -21,6 +21,7 @@
 CC?=clang
 CFLAGS+= -Wall
 LDFLAGS+= -lpcap -lm
+LDFLAGS_SSL= -lcrypto
 
 .ifndef(PREFIX)
 PREFIX=/usr/local
@@ -42,9 +43,9 @@ SRCPATH= tools
 
 
 SBINTOOLS= iot-scan iot-tl-plug
-BINTOOLS= 
+BINTOOLS= iot-tddp
 TOOLS= $(BINTOOLS) $(SBINTOOLS)
-LIBS= libipv4.o
+LIBS= libiot.o
 
 all: $(TOOLS) data/iot-toolkit.conf
 
@@ -54,6 +55,8 @@ iot-scan: $(SRCPATH)/iot-scan.c $(SRCPATH)/iot-scan.h $(SRCPATH)/iot-toolkit.h $
 iot-tl-plug: $(SRCPATH)/iot-tl-plug.c $(SRCPATH)/iot-tl-plug.h $(SRCPATH)/iot-toolkit.h $(LIBS) $(SRCPATH)/libiot.h
 	$(CC) $(CPPFLAGS) $(CFLAGS) -o iot-tl-plug $(SRCPATH)/iot-tl-plug.c $(LIBS) $(LDFLAGS)
 
+iot-tddp: $(SRCPATH)/iot-tddp.c $(SRCPATH)/iot-tddp.h $(SRCPATH)/iot-toolkit.h $(LIBS) $(SRCPATH)/libiot.h
+	$(CC) $(CPPFLAGS) $(CFLAGS) -o iot-tddp $(SRCPATH)/iot-tl-plug.c $(LIBS) $(LDFLAGS) $(LDFLAGS_SSL)
 
 libiot.o: $(SRCPATH)/libiot.c $(SRCPATH)/libiot.h
 	$(CC) $(CPPFLAGS) $(CFLAGS) -c -o libiot.o $(SRCPATH)/libiot.c
@@ -87,6 +90,7 @@ install: all
 
 uninstall:
 	# Remove the binaries
+	rm -f $(BINPATH)/iot-tddp
 	rm -f $(SBINPATH)/iot-scan
 	rm -f $(SBINPATH)/iot-tl-plug
 
@@ -96,6 +100,7 @@ uninstall:
 	# Remove the manual pages
 	rm -f $(MANPATH)/man1/iot-scan.1
 	rm -f $(MANPATH)/man1/iot-tl-plug.1
+	rm -f $(MANPATH)/man1/iot-tddp.1
 	rm -f $(MANPATH)/man5/iot-toolkit.conf.5
 	rm -f $(MANPATH)/man7/iot-toolkit.7
 
