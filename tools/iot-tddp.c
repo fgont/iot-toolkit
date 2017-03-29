@@ -1,5 +1,5 @@
 /*
- * iot-scan: An IoT Scanning Tool
+ * iot-tddp: An implementation of TDDP
  *
  * Copyright (C) 2017 Fernando Gont <fgont@si6networks.com>
  *
@@ -18,9 +18,10 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  *
- * Build with: make iot-scan
+ * Build with: make iot-tddp
  *
- * It requires that the libpcap library be installed on your system.
+ * It requires that the libpcap and the openssl libraries be installed
+ * on your system.
  *
  * Please send any bug reports to Fernando Gont <fgont@si6networks.com>
  */
@@ -147,65 +148,6 @@ int main(int argc, char **argv){
 	socklen_t				sockaddrfrom_len;
 	struct	tddp_hdr		*tddp_hdr;
 	unsigned int			npayload=0;
-/*
-## Packet Type
-# 0x01	SET_USR_CFG - set configuration information
-# 0x02	GET_SYS_INF - get configuration information
-# 0x03	CMD_SPE_OPR - special configuration commands
-# 0x04	HEART_BEAT -  the heartbeat package
-tddp_type = "03"
-
-## Code Request Type
-# 0x01 TDDP_REQUEST
-# 0x02 TDDP_REPLY
-tddp_code = "01"
-
-## Reply Info Status
-# 0x00 REPLY_OK
-# 0x02 ?
-# 0x03 ?
-# 0x09 REPLY_ERROR
-# 0xFF ?
-tddp_reply = "00"
-
-## Packet Length (not including header)
-# 4 bytes
-tddp_length = "00000000"
-
-## Packet ID
-# 2 bytes
-# supposed to be incremented +1 for each packet
-tddp_id = "0001"
-
-# Subtype for CMD_SPE_OPR (Special Operations Command)
-# Set to 0x00 for SET_USR_CFG and GET_SYS_INF
-#
-# Subtypes described in patent application, hex value unknown:
-#  CMD_SYS_OPR     Router system operation, including: init, save, reboot, reset, clr dos
-#  CMD_AUTO_TEST   MAC for writing operation, the user replies CMD_SYS_INIT broadcast packet
-#  CMD_CONFIG_MAC  Factory settings MAC operations
-#  CMD_CANCEL_TEST Cancel automatic test, stop receiving broadcast packets
-#  CMD_GET_PROD_ID Get product ID
-#  CMD_SYS_INIT    Initialize a router
-#  CMD_CONFIG_PIN  Router PIN code
-#
-# Subtypes that seem to work for a HS-110 Smart Plug:
-#  0x0A returns "ABCD0110"
-#  0x12 returns the deviceID
-#  0x14 returns the hwID
-#  0x06 changes MAC
-#  0x13 changes deviceID
-#  0x15 changes deviceID
-#
-# Subtypes that seem to work for an Archer C9 Router:
-#  0x0E returns physical status of WAN link:
-#               wan_ph_link 1 0 = disconnected
-#               wan_ph_link 1 1 = connected
-#  0x0F returns logical status of WAN link: wan_logic_link 1 0
-#  0x0A returns \x00\x09\x00\x01\x00\x00\x00\x00
-#  0x15 returns \x01\x00\x00\x00\x00\x00\x00\x00
-#  0x18 returns 1
-*/
 
 	char				username_admin[]="admin";
 	char				password_admin[]="admin";
@@ -217,10 +159,6 @@ tddp_id = "0001"
 	char				keydigest[MD5_DIGEST_LENGTH];
     DES_cblock			des_key[8];
     DES_key_schedule 	key;
-/*
-    DES_cblock			ciphertext;
-    DES_cblock			buf;
-*/
 	uint8_t		tddp_version=2;
 
 /*
@@ -258,7 +196,7 @@ tddp_reply = "00"
 		{"pktid", required_argument, 0, 'I'},
 		{"code", required_argument, 0, 'c'},
 		{"dst-address", required_argument, 0, 'd'},
-		{"local-scan", no_argument, 0, 'L'},
+		{"scan", no_argument, 0, 'Z'},
 		{"retrans", required_argument, 0, 'x'},
 		{"timeout", required_argument, 0, 'O'},
 		{"subtype", required_argument, 0, 't'},
@@ -274,7 +212,7 @@ tddp_reply = "00"
 		{0, 0, 0,  0 }
 	};
 
-	char shortopts[]= "i:I:c:d:Lx:O:t:T:u:o:a:p:r:vV:h";
+	char shortopts[]= "i:I:c:d:Zx:O:t:T:u:o:a:p:r:vV:h";
 
 	char option;
 
@@ -461,13 +399,13 @@ tddp_reply = "00"
 	verbose_f= idata.verbose_f;
 
 	if(geteuid()){
-		puts("iot-scan needs superuser privileges to run");
+		puts("iot-tddp needs superuser privileges to run");
 		exit(EXIT_FAILURE);
 	}
 
 	if(scan_local_f && !idata.iface_f){
 		/* XXX This should later allow to just specify local scan and automatically choose an interface */
-		puts("Must specify the network interface with the -i option when a local scan is selected");
+/*		puts("Must specify the network interface with the -i option when a local scan is selected"); */
 /*		exit(EXIT_FAILURE); */
 	}
 
@@ -484,8 +422,6 @@ tddp_reply = "00"
 		puts("Error obtaining list of local interfaces and addresses");
 		exit(EXIT_FAILURE);
 	}
-
-puts("Antes de chequear que hago");
 
 	if(scan_local_f){
 		/* If an interface was specified, we select an IPv4 address from such interface */
@@ -534,7 +470,13 @@ puts("Antes de chequear que hago");
 
 		memset(&sockaddr_in, 0, sizeof(sockaddr_in));
 		sockaddr_in.sin_family= AF_INET;
-		sockaddr_in.sin_port= htons(TDDP_RECEIVE_PORT);  /* Allow Sockets API to set an ephemeral port */
+		if(idata.srcport_f){
+			sockaddr_in.sin_port= htons(idata.srcport);  /* Allow Sockets API to set an ephemeral port */
+		}
+		else{
+			sockaddr_in.sin_port= htons(TDDP_RECEIVE_PORT);  /* Allow Sockets API to set an ephemeral port */
+		}
+
 		sockaddr_in.sin_addr= idata.srcaddr;
 
 		if(bind(idata.fd2, (struct sockaddr *) &sockaddr_in, sizeof(sockaddr_in)) == -1){
@@ -544,7 +486,13 @@ puts("Antes de chequear que hago");
 
 		memset(&sockaddr_to, 0, sizeof(sockaddr_to));
 		sockaddr_to.sin_family= AF_INET;
-		sockaddr_to.sin_port= htons(TDDP_SERVICE_PORT);
+
+		if(idata.dstport_f){
+			sockaddr_to.sin_port= htons(idata.dstport);
+		}
+		else{
+			sockaddr_to.sin_port= htons(TDDP_SERVICE_PORT);
+		}
 		sockaddr_to.sin_addr= idata.dstaddr;		
 
 		memset(&sockaddr_from, 0, sizeof(sockaddr_from));
@@ -594,8 +542,8 @@ puts("Antes de chequear que hago");
 	    MD5_Init(&mdContext);
         MD5_Update(&mdContext, sendbuff, nsendbuff);
 	    MD5_Final (tddp_hdr->md5_digest ,&mdContext);
-puts("This is what I'm going to send");
-print_tddp_packet(sendbuff, nsendbuff);
+		puts("Sending TDDP Packet:");
+		print_tddp_packet(sendbuff, nsendbuff);
 
 		if(!idata.dstaddr_f){
 			puts("Must specify destination address");
@@ -645,14 +593,14 @@ print_tddp_packet(sendbuff, nsendbuff);
 					continue;
 				}
 				else{
-					perror("iot-scan:");
+					perror("iot-tddp:");
 					exit(EXIT_FAILURE);
 				}
 			}
 
 			if(gettimeofday(&curtime, NULL) == -1){
 				if(idata.verbose_f)
-					perror("iot-scan");
+					perror("iot-tddp");
 
 				exit(EXIT_FAILURE);
 			}
@@ -670,34 +618,32 @@ print_tddp_packet(sendbuff, nsendbuff);
 
 
 			if(sel && FD_ISSET(idata.fd2, &rset)){
-puts("Reading from socket");
 				/* XXX: Process response packet */
 
 				if( (nreadbuff = recvfrom(idata.fd2, readbuff, sizeof(readbuff), 0, (struct sockaddr *)&sockaddr_from, &sockaddrfrom_len)) == -1){
-					perror("iot-scan: ");
+					perror("iot-tddp: ");
 					exit(EXIT_FAILURE);
 				}
 
 				if(inet_ntop(AF_INET, &(sockaddr_from.sin_addr), pv4addr, sizeof(pv4addr)) == NULL){
-					perror("iot-scan: ");
+					perror("iot-tddp: ");
 					exit(EXIT_FAILURE);
 				}
 
-printf("Read %u bytes from %s\n", (unsigned int)nreadbuff, pv4addr);
+				printf("Read %u bytes from %s\n", (unsigned int)nreadbuff, pv4addr);
 				print_tddp_packet(readbuff, nreadbuff);
 			}
 
 			if(sel && FD_ISSET(idata.fd, &rset)){
-puts("Reading from socket");
 				/* XXX: Process response packet */
 
 				if( (nreadbuff = recvfrom(idata.fd, readbuff, sizeof(readbuff), 0, (struct sockaddr *)&sockaddr_from, &sockaddrfrom_len)) == -1){
-					perror("iot-scan: ");
+					perror("iot-tddp: ");
 					exit(EXIT_FAILURE);
 				}
 
 				if(inet_ntop(AF_INET, &(sockaddr_from.sin_addr), pv4addr, sizeof(pv4addr)) == NULL){
-					perror("iot-scan: ");
+					perror("iot-tddp: ");
 					exit(EXIT_FAILURE);
 				}
 
@@ -709,7 +655,7 @@ puts("Reading from socket");
 					}
 				}
 
-printf("Read %u bytes from %s\n", (unsigned int)nreadbuff, pv4addr);
+				printf("Read %u bytes from %s\n", (unsigned int)nreadbuff, pv4addr);
 				print_tddp_packet(readbuff, nreadbuff);
 			}
 
@@ -720,18 +666,19 @@ printf("Read %u bytes from %s\n", (unsigned int)nreadbuff, pv4addr);
 			}
 
 			if(!donesending_f && idata.pending_write_f && FD_ISSET(idata.fd, &wset)){
-puts("Going to write");
 				idata.pending_write_f=FALSE;
 
 				/* XXX: SEND PROBE PACKET */
+
 				if( sendto(idata.fd, sendbuff, nsendbuff, 0, (struct sockaddr *) &sockaddr_to, sizeof(sockaddr_to)) == -1){
-					perror("iot-scan: ");
+					perror("iot-tddp: ");
 					exit(EXIT_FAILURE);
 				}
 
+
 				if(gettimeofday(&lastprobe, NULL) == -1){
 					if(idata.verbose_f)
-						perror("iot-scan");
+						perror("iot-tddp");
 
 					exit(EXIT_FAILURE);
 				}
@@ -746,13 +693,13 @@ puts("Going to write");
 
 			if(FD_ISSET(idata.fd, &eset)){
 				if(idata.verbose_f)
-					puts("iot-scaner: Found exception on descriptor");
+					puts("iot-tddp: Found exception on descriptor");
 
 				exit(EXIT_FAILURE);
 			}
 			if(FD_ISSET(idata.fd2, &eset)){
 				if(idata.verbose_f)
-					puts("iot-scaner: Found exception on descriptor");
+					puts("iot-tddp: Found exception on descriptor");
 
 				exit(EXIT_FAILURE);
 			}
@@ -808,38 +755,49 @@ int match_strings(char *buscar, char *buffer){
 /*
  * Function: usage()
  *
- * Prints the syntax of the iot-scan tool
+ * Prints the syntax of the iot-tddp tool
  */
 
 void usage(void){
-	puts("usage: iot-scan (-L | -d) [-i INTERFACE] [-v] [-h]");
+	puts("usage: iot-tddp (-L | -d) [-i INTERFACE] [-v] [-h]");
 }
 
 
 /*
  * Function: print_help()
  *
- * Prints help information for the iot-scan tool
+ * Prints help information for the iot-tddp tool
  */
 
 void print_help(void){
 	puts(SI6_TOOLKIT);
-	puts( "iot-scan: An IoT scanning tool\n");
+	puts( "iot-tddp: A tool to play with the TDDP protocol\n");
 	usage();
     
 	puts("\nOPTIONS:\n"
 	     "  --interface, -i             Network interface\n"
-	     "  --dst-address, -d           IPv6 Destination Range or Prefix\n"
-	     "  --retrans, -x               Number of retransmissions of each probe\n"
+	     "  --dst-address, -d           IP Destination Address\n"
+		 "  --src-port, -o              Transport Source Port\n"
+		 "  --dst-port, -a              Transport Destination Port\n"
+	     "  --retrans, -x               Number of retransmissions of each packet\n"
 	     "  --timeout, -O               Timeout in seconds (default: 1 second)\n"
-	     "  --local-scan, -L            Scan the local subnet\n"
-	     "  --help, -h                  Print help for the iot-scan tool\n"
+		 "  --version, -V               TDDP version\n"
+		 "  --pktid, -I                 TDDP PktId\n"
+		 "  --replyinfo, -r             TDDP ReplyInfo\n"
+		 "  --type, -T                  TDDP Type\n"
+		 "  --subtype, -t               TDDP SubType\n"
+		 "  --code,-c                   TDDP Code\n"
+		 "  --user, -u                  TP-Link device Username\n"
+		 "  --password, -p              TP-Link device Password\n"
+		 "  --scan, -Z      	        Scan for TP-Link devices\n"
+	     "  --help, -h                  Print help for the iot-tddp tool\n"
 	     "  --verbose, -v               Be verbose\n"
 	     "\n"
-	     " Programmed by Fernando Gont for SI6 Networks <http://www.si6networks.com>\n"
+	     " Programmed by Fernando Gont for SI6 Networks <https://www.si6networks.com>\n"
 	     " Please send any bug reports to <fgont@si6networks.com>\n"
 	);
 }
+
 
 
 

@@ -152,12 +152,13 @@ int main(int argc, char **argv){
 		{"local-scan", no_argument, 0, 'L'},
 		{"retrans", required_argument, 0, 'x'},
 		{"timeout", required_argument, 0, 'O'},
+		{"type", required_argument, 0, 't'},
 		{"verbose", no_argument, 0, 'v'},
 		{"help", no_argument, 0, 'h'},
 		{0, 0, 0,  0 }
 	};
 
-	char shortopts[]= "i:d:Lx:O:vh";
+	char shortopts[]= "i:d:Lx:O:t:vh";
 
 	char option;
 
@@ -248,6 +249,25 @@ int main(int argc, char **argv){
 				idata.local_timeout=atoi(optarg);
 				break;
 
+			case 't':
+				scan_type_f= TRUE;
+
+				if(strncmp(optarg, "cams", strlen("cams")) == 0 || strncmp(optarg, "cameras", strlen("cameras")) == 0){
+					scan_type= scan_type | SCAN_IP_CAMERAS;
+				}
+				else if(strncmp(optarg, "plugs", strlen("plugs")) == 0 || strncmp(optarg, "smartplugs", strlen("smartplugs")) == 0){
+					scan_type= scan_type | SCAN_SMART_PLUGS;
+				}
+				else if(strncmp(optarg, "all", strlen("all")) == 0){
+					scan_type= scan_type | SCAN_ALL;
+				}
+				else{
+					puts("Unknown device type in '-t' option");
+					exit(EXIT_FAILURE);
+				}
+
+				break;
+
 			case 'v':	/* Be verbose */
 				idata.verbose_f++;
 				break;
@@ -279,7 +299,7 @@ int main(int argc, char **argv){
 	if(scan_local_f && !idata.iface_f){
 		/* XXX This should later allow to just specify local scan and automatically choose an interface */
 		puts("Must specify the network interface with the -i option when a local scan is selected");
-/*		exit(EXIT_FAILURE); */
+		exit(EXIT_FAILURE);
 	}
 
 	if(!dst_f && !scan_local_f){
@@ -299,7 +319,7 @@ int main(int argc, char **argv){
 /*	debug_print_iflist(&(idata.iflist)); */
 
 	if(!scan_type_f){
-		scan_type= IP_CAMERAS | SMART_PLUGS;
+		scan_type= SCAN_IP_CAMERAS | SCAN_SMART_PLUGS;
 	}
 
 	if(scan_local_f){
@@ -345,342 +365,318 @@ int main(int argc, char **argv){
 			exit(EXIT_FAILURE);
 		}
 
-if(scan_type | SMART_PLUGS){
-		memset(&sockaddr_to, 0, sizeof(sockaddr_to));
-		sockaddr_to.sin_family= AF_INET;
-		sockaddr_to.sin_port= htons(TP_LINK_SMART_PORT);
+		if(scan_type | SCAN_SMART_PLUGS){
+			memset(&sockaddr_to, 0, sizeof(sockaddr_to));
+			sockaddr_to.sin_family= AF_INET;
+			sockaddr_to.sin_port= htons(TP_LINK_SMART_PORT);
 
-		memset(&sockaddr_from, 0, sizeof(sockaddr_from));
-		sockaddr_from.sin_family= AF_INET;
-		sockaddrfrom_len=sizeof(sockaddr_from);
+			memset(&sockaddr_from, 0, sizeof(sockaddr_from));
+			sockaddr_from.sin_family= AF_INET;
+			sockaddrfrom_len=sizeof(sockaddr_from);
 
 
-		if ( inet_pton(AF_INET, IP_LIMITED_MULTICAST, &(sockaddr_to.sin_addr)) <= 0){
-			puts("inet_pton(): Error setting multicast address");
-			exit(EXIT_FAILURE);
-		}
-
-		FD_ZERO(&sset);
-		FD_SET(idata.fd, &sset);
-
-		lastprobe.tv_sec= 0;	
-		lastprobe.tv_usec=0;
-		idata.pending_write_f=TRUE;	
-
-		/* The end_f flag is set after the last probe has been sent and a timeout period has elapsed.
-		   That is, we give responses enough time to come back
-		 */
-		while(!end_f){
-			rset= sset;
-			wset= sset;
-			eset= sset;
-
-			if(!donesending_f){
-				/* This is the retransmission timer */
-				timeout.tv_sec= 1;
-				timeout.tv_usec= 0;
-			}
-			else{
-				/* XXX: This should use the parameter from command line */
-				timeout.tv_sec= idata.local_timeout;
-				timeout.tv_usec=0;
-			}
-
-			/*
-				Check for readability and exceptions. We only check for writeability if there is pending data
-				to send.
-			 */
-			if((sel=select(idata.fd+1, &rset, (idata.pending_write_f?&wset:NULL), &eset, &timeout)) == -1){
-				if(errno == EINTR){
-					continue;
-				}
-				else{
-					perror("iot-scan:");
-					exit(EXIT_FAILURE);
-				}
-			}
-
-			if(gettimeofday(&curtime, NULL) == -1){
-				if(idata.verbose_f)
-					perror("iot-scan");
-
+			if ( inet_pton(AF_INET, IP_LIMITED_MULTICAST, &(sockaddr_to.sin_addr)) <= 0){
+				puts("inet_pton(): Error setting multicast address");
 				exit(EXIT_FAILURE);
 			}
 
-			/* Check whether we have finished probing all targets */
-			if(donesending_f){
+			FD_ZERO(&sset);
+			FD_SET(idata.fd, &sset);
+
+			lastprobe.tv_sec= 0;	
+			lastprobe.tv_usec=0;
+			idata.pending_write_f=TRUE;	
+
+			/* The end_f flag is set after the last probe has been sent and a timeout period has elapsed.
+			   That is, we give responses enough time to come back
+			 */
+			while(!end_f){
+				rset= sset;
+				wset= sset;
+				eset= sset;
+
+				if(!donesending_f){
+					/* This is the retransmission timer */
+					timeout.tv_sec= 1;
+					timeout.tv_usec= 0;
+				}
+				else{
+					/* XXX: This should use the parameter from command line */
+					timeout.tv_sec= idata.local_timeout;
+					timeout.tv_usec=0;
+				}
+
 				/*
-				   Just wait for SELECT_TIMEOUT seconds for any incoming responses.
-				*/
-
-				if(is_time_elapsed(&curtime, &lastprobe, idata.local_timeout * 1000000)){
-					end_f=TRUE;
+					Check for readability and exceptions. We only check for writeability if there is pending data
+					to send.
+				 */
+				if((sel=select(idata.fd+1, &rset, (idata.pending_write_f?&wset:NULL), &eset, &timeout)) == -1){
+					if(errno == EINTR){
+						continue;
+					}
+					else{
+						perror("iot-scan:");
+						exit(EXIT_FAILURE);
+					}
 				}
-			}
 
+				if(gettimeofday(&curtime, NULL) == -1){
+					if(idata.verbose_f)
+						perror("iot-scan");
 
-			if(sel && FD_ISSET(idata.fd, &rset)){
-				/* XXX: Process response packet */
-
-				if( (nreadbuff = recvfrom(idata.fd, readbuff, sizeof(readbuff), 0, (struct sockaddr *)&sockaddr_from, &sockaddrfrom_len)) == -1){
-					perror("iot-scan: ");
 					exit(EXIT_FAILURE);
 				}
 
-				if(inet_ntop(AF_INET, &(sockaddr_from.sin_addr), pv4addr, sizeof(pv4addr)) == NULL){
-					perror("iot-scan: ");
-					exit(EXIT_FAILURE);
+				/* Check whether we have finished probing all targets */
+				if(donesending_f){
+					/*
+					   Just wait for SELECT_TIMEOUT seconds for any incoming responses.
+					*/
+
+					if(is_time_elapsed(&curtime, &lastprobe, idata.local_timeout * 1000000)){
+						end_f=TRUE;
+					}
 				}
 
-				tp_link_decrypt((unsigned char *)readbuff, nreadbuff);
 
-				alias= NULL_STRING;
-				dev_name= NULL_STRING;
-				type= NULL_STRING;
-				model= NULL_STRING;
+				if(sel && FD_ISSET(idata.fd, &rset)){
+					/* XXX: Process response packet */
 
-				/* Get to system:get_sysinfo */
-				if( (json1=json_get_objects(readbuff, (nreadbuff))) != NULL){
-					if( json_get_value(json1, &json_value, "\"system\"")){
-						if( (json2=json_get_objects(json_value.value, json_value.len)) != NULL){
-							if( json_get_value(json2, &json_value, "\"get_sysinfo\"")){
-								if( (json3=json_get_objects(json_value.value, json_value.len)) != NULL){
-									json_remove_quotes(json3);
-									if( json_get_value(json3, &json_value, "type")){
-										type=json_value.value;
+					if( (nreadbuff = recvfrom(idata.fd, readbuff, sizeof(readbuff), 0, (struct sockaddr *)&sockaddr_from, &sockaddrfrom_len)) == -1){
+						perror("iot-scan: ");
+						exit(EXIT_FAILURE);
+					}
+
+					if(inet_ntop(AF_INET, &(sockaddr_from.sin_addr), pv4addr, sizeof(pv4addr)) == NULL){
+						perror("iot-scan: ");
+						exit(EXIT_FAILURE);
+					}
+
+					tp_link_decrypt((unsigned char *)readbuff, nreadbuff);
+
+					alias= NULL_STRING;
+					dev_name= NULL_STRING;
+					type= NULL_STRING;
+					model= NULL_STRING;
+
+					/* Get to system:get_sysinfo */
+					if( (json1=json_get_objects(readbuff, (nreadbuff))) != NULL){
+						if( json_get_value(json1, &json_value, "\"system\"")){
+							if( (json2=json_get_objects(json_value.value, json_value.len)) != NULL){
+								if( json_get_value(json2, &json_value, "\"get_sysinfo\"")){
+									if( (json3=json_get_objects(json_value.value, json_value.len)) != NULL){
+										json_remove_quotes(json3);
+										if( json_get_value(json3, &json_value, "type")){
+											type=json_value.value;
+										}
+										if( json_get_value(json3, &json_value, "model")){
+											model=json_value.value;
+										}
+										if( json_get_value(json3, &json_value, "dev_name")){
+											dev_name=json_value.value;
+										}
+										if( json_get_value(json3, &json_value, "alias")){
+											alias=json_value.value;
+										}	
+
+										printf("%s # %s: TP-Link %s: %s: \"%s\"\n", pv4addr, type, model, dev_name, alias);
+		
 									}
-									if( json_get_value(json3, &json_value, "model")){
-										model=json_value.value;
-									}
-									if( json_get_value(json3, &json_value, "dev_name")){
-										dev_name=json_value.value;
-									}
-									if( json_get_value(json3, &json_value, "alias")){
-										alias=json_value.value;
-									}	
-/*
-									printf("%s: \"%s\" (\"%s\": %s %s)\n", pv4addr, alias, dev_name, type, model);
-*/
-									printf("%s # %s: TP-Link %s: %s: \"%s\"\n", pv4addr, type, model, dev_name, alias);
-			
 								}
 							}
 						}
 					}
+
 				}
 
-			}
 
-
-			if(!donesending_f && !idata.pending_write_f && is_time_elapsed(&curtime, &lastprobe, 1 * 1000000)){
-				idata.pending_write_f=TRUE;
-				continue;
-			}
-
-			if(!donesending_f && idata.pending_write_f && FD_ISSET(idata.fd, &wset)){
-				idata.pending_write_f=FALSE;
-
-				/* XXX: SEND PROBE PACKET */
-				nsendbuff= Strnlen(TP_LINK_SMART_DISCOVER, MAX_TP_COMMAND_LENGTH);
-				memcpy(sendbuff, TP_LINK_SMART_DISCOVER, nsendbuff);
-				tp_link_crypt((unsigned char *)sendbuff, nsendbuff);
-/*
-				if( sendto(idata.fd, encrypted, sizeof(encrypted), 0, (struct sockaddr *) &sockaddr_to, sizeof(sockaddr_to)) == -1){
-					perror("iot-scan: ");
-					exit(EXIT_FAILURE);
-				}
-*/
-
-				if( sendto(idata.fd, sendbuff, nsendbuff, 0, (struct sockaddr *) &sockaddr_to, sizeof(sockaddr_to)) == -1){
-					perror("iot-scan: ");
-					exit(EXIT_FAILURE);
-				}
-
-				if(gettimeofday(&lastprobe, NULL) == -1){
-					if(idata.verbose_f)
-						perror("iot-scan");
-
-					exit(EXIT_FAILURE);
-				}
-
-				retrans++;
-
-				if(retrans >= idata.local_retrans)
-					donesending_f= 1;
-
-			}
-
-
-			if(FD_ISSET(idata.fd, &eset)){
-				if(idata.verbose_f)
-					puts("iot-scaner: Found exception on descriptor");
-
-				exit(EXIT_FAILURE);
-			}
-		}
-
-}
-if(scan_type | IP_CAMERAS){
-/* puts("Voy a escanear camaras"); */
-donesending_f=FALSE;
-end_f=FALSE;
-		memset(&sockaddr_to, 0, sizeof(sockaddr_to));
-		sockaddr_to.sin_family= AF_INET;
-		sockaddr_to.sin_port= htons(TP_LINK_IP_CAMERA_TDDP_PORT);
-
-		memset(&sockaddr_from, 0, sizeof(sockaddr_from));
-		sockaddr_from.sin_family= AF_INET;
-		sockaddrfrom_len=sizeof(sockaddr_from);
-
-
-		if ( inet_pton(AF_INET, IP_LIMITED_MULTICAST, &(sockaddr_to.sin_addr)) <= 0){
-			puts("inet_pton(): Error setting multicast address");
-			exit(EXIT_FAILURE);
-		}
-
-		FD_ZERO(&sset);
-		FD_SET(idata.fd, &sset);
-
-		lastprobe.tv_sec= 0;	
-		lastprobe.tv_usec=0;
-		idata.pending_write_f=TRUE;	
-
-		/* The end_f flag is set after the last probe has been sent and a timeout period has elapsed.
-		   That is, we give responses enough time to come back
-		 */
-		while(!end_f){
-			rset= sset;
-			wset= sset;
-			eset= sset;
-
-			if(!donesending_f){
-				/* This is the retransmission timer */
-				timeout.tv_sec= 1;
-				timeout.tv_usec= 0;
-			}
-			else{
-				/* XXX: This should use the parameter from command line */
-				timeout.tv_sec= idata.local_timeout;
-				timeout.tv_usec=0;
-			}
-
-			/*
-				Check for readability and exceptions. We only check for writeability if there is pending data
-				to send.
-			 */
-			if((sel=select(idata.fd+1, &rset, (idata.pending_write_f?&wset:NULL), &eset, &timeout)) == -1){
-				if(errno == EINTR){
+				if(!donesending_f && !idata.pending_write_f && is_time_elapsed(&curtime, &lastprobe, 1 * 1000000)){
+					idata.pending_write_f=TRUE;
 					continue;
 				}
-				else{
-					perror("iot-scan:");
+
+				if(!donesending_f && idata.pending_write_f && FD_ISSET(idata.fd, &wset)){
+					idata.pending_write_f=FALSE;
+
+					/* XXX: SEND PROBE PACKET */
+					nsendbuff= Strnlen(TP_LINK_SMART_DISCOVER, MAX_TP_COMMAND_LENGTH);
+					memcpy(sendbuff, TP_LINK_SMART_DISCOVER, nsendbuff);
+					tp_link_crypt((unsigned char *)sendbuff, nsendbuff);
+
+					if( sendto(idata.fd, sendbuff, nsendbuff, 0, (struct sockaddr *) &sockaddr_to, sizeof(sockaddr_to)) == -1){
+						perror("iot-scan: ");
+						exit(EXIT_FAILURE);
+					}
+
+					if(gettimeofday(&lastprobe, NULL) == -1){
+						if(idata.verbose_f)
+							perror("iot-scan");
+
+						exit(EXIT_FAILURE);
+					}
+
+					retrans++;
+
+					if(retrans >= idata.local_retrans)
+						donesending_f= 1;
+
+				}
+
+
+				if(FD_ISSET(idata.fd, &eset)){
+					if(idata.verbose_f)
+						puts("iot-scaner: Found exception on descriptor");
+
 					exit(EXIT_FAILURE);
 				}
 			}
+		}
+		if(scan_type | SCAN_IP_CAMERAS){
+			donesending_f=FALSE;
+			end_f=FALSE;
+			memset(&sockaddr_to, 0, sizeof(sockaddr_to));
+			sockaddr_to.sin_family= AF_INET;
+			sockaddr_to.sin_port= htons(TP_LINK_IP_CAMERA_TDDP_PORT);
 
-			if(gettimeofday(&curtime, NULL) == -1){
-				if(idata.verbose_f)
-					perror("iot-scan");
+			memset(&sockaddr_from, 0, sizeof(sockaddr_from));
+			sockaddr_from.sin_family= AF_INET;
+			sockaddrfrom_len=sizeof(sockaddr_from);
 
+
+			if ( inet_pton(AF_INET, IP_LIMITED_MULTICAST, &(sockaddr_to.sin_addr)) <= 0){
+				puts("inet_pton(): Error setting multicast address");
 				exit(EXIT_FAILURE);
 			}
 
-			/* Check whether we have finished probing all targets */
-			if(donesending_f){
-				/*
-				   Just wait for SELECT_TIMEOUT seconds for any incoming responses.
-				*/
+			FD_ZERO(&sset);
+			FD_SET(idata.fd, &sset);
 
-				if(is_time_elapsed(&curtime, &lastprobe, idata.local_timeout * 1000000)){
-					end_f=TRUE;
-				}
-			}
+			lastprobe.tv_sec= 0;	
+			lastprobe.tv_usec=0;
+			idata.pending_write_f=TRUE;	
 
+			/* The end_f flag is set after the last probe has been sent and a timeout period has elapsed.
+			   That is, we give responses enough time to come back
+			 */
+			while(!end_f){
+				rset= sset;
+				wset= sset;
+				eset= sset;
 
-			if(sel && FD_ISSET(idata.fd, &rset)){
-				/* XXX: Process response packet */
-
-				if( (nreadbuff = recvfrom(idata.fd, readbuff, sizeof(readbuff), 0, (struct sockaddr *)&sockaddr_from, &sockaddrfrom_len)) == -1){
-					perror("iot-scan: ");
-					exit(EXIT_FAILURE);
-				}
-/* puts("Got response"); */
-
-				if(inet_ntop(AF_INET, &(sockaddr_from.sin_addr), pv4addr, sizeof(pv4addr)) == NULL){
-					perror("iot-scan: ");
-					exit(EXIT_FAILURE);
-				}
-
-				/* Compare response with known one */
-				if(nreadbuff == sizeof(TP_LINK_IP_CAMERA_RESPONSE)){
-					if(memcmp(readbuff, TP_LINK_IP_CAMERA_RESPONSE, nreadbuff) == 0){
-						printf("%s # camera: TP-Link IP camera\n", pv4addr);
-					}
-					else{
-/* puts("Incorrect response"); */
-					}
+				if(!donesending_f){
+					/* This is the retransmission timer */
+					timeout.tv_sec= 1;
+					timeout.tv_usec= 0;
 				}
 				else{
-/* puts("Incorrect size"); */
-				}
-			}
-
-
-			if(!donesending_f && !idata.pending_write_f && is_time_elapsed(&curtime, &lastprobe, 1 * 1000000)){
-				idata.pending_write_f=TRUE;
-				continue;
-			}
-
-			if(!donesending_f && idata.pending_write_f && FD_ISSET(idata.fd, &wset)){
-				idata.pending_write_f=FALSE;
-
-				/* XXX: SEND PROBE PACKET */
-
-				/* XXX: Will not happen, still check in case code is changed */
-				if(sizeof(TP_LINK_IP_CAMERA_DISCOVER) > sizeof(sendbuff)){
-					puts("Internal buffer too short");
-					exit(EXIT_FAILURE);
+					/* XXX: This should use the parameter from command line */
+					timeout.tv_sec= idata.local_timeout;
+					timeout.tv_usec=0;
 				}
 
-				nsendbuff= sizeof(TP_LINK_IP_CAMERA_DISCOVER);
-				memcpy(sendbuff, TP_LINK_IP_CAMERA_DISCOVER, nsendbuff);
-
-/*
-				if( sendto(idata.fd, encrypted, sizeof(encrypted), 0, (struct sockaddr *) &sockaddr_to, sizeof(sockaddr_to)) == -1){
-					perror("iot-scan: ");
-					exit(EXIT_FAILURE);
+				/*
+					Check for readability and exceptions. We only check for writeability if there is pending data
+					to send.
+				 */
+				if((sel=select(idata.fd+1, &rset, (idata.pending_write_f?&wset:NULL), &eset, &timeout)) == -1){
+					if(errno == EINTR){
+						continue;
+					}
+					else{
+						perror("iot-scan:");
+						exit(EXIT_FAILURE);
+					}
 				}
-*/
 
-				if( sendto(idata.fd, sendbuff, nsendbuff, 0, (struct sockaddr *) &sockaddr_to, sizeof(sockaddr_to)) == -1){
-					perror("iot-scan: ");
-					exit(EXIT_FAILURE);
-				}
-
-				if(gettimeofday(&lastprobe, NULL) == -1){
+				if(gettimeofday(&curtime, NULL) == -1){
 					if(idata.verbose_f)
 						perror("iot-scan");
 
 					exit(EXIT_FAILURE);
 				}
 
-				retrans++;
+				/* Check whether we have finished probing all targets */
+				if(donesending_f){
+					/*
+					   Just wait for SELECT_TIMEOUT seconds for any incoming responses.
+					*/
 
-				if(retrans >= idata.local_retrans)
-					donesending_f= 1;
+					if(is_time_elapsed(&curtime, &lastprobe, idata.local_timeout * 1000000)){
+						end_f=TRUE;
+					}
+				}
 
-			}
+
+				if(sel && FD_ISSET(idata.fd, &rset)){
+					/* XXX: Process response packet */
+
+					if( (nreadbuff = recvfrom(idata.fd, readbuff, sizeof(readbuff), 0, (struct sockaddr *)&sockaddr_from, &sockaddrfrom_len)) == -1){
+						perror("iot-scan: ");
+						exit(EXIT_FAILURE);
+					}
+	/* puts("Got response"); */
+
+					if(inet_ntop(AF_INET, &(sockaddr_from.sin_addr), pv4addr, sizeof(pv4addr)) == NULL){
+						perror("iot-scan: ");
+						exit(EXIT_FAILURE);
+					}
+
+					/* Compare response with known one */
+					if(nreadbuff == sizeof(TP_LINK_IP_CAMERA_RESPONSE)){
+						if(memcmp(readbuff, TP_LINK_IP_CAMERA_RESPONSE, nreadbuff) == 0){
+							printf("%s # camera: TP-Link IP camera\n", pv4addr);
+						}
+					}
+				}
 
 
-			if(FD_ISSET(idata.fd, &eset)){
-				if(idata.verbose_f)
-					puts("iot-scan: Found exception on descriptor");
+				if(!donesending_f && !idata.pending_write_f && is_time_elapsed(&curtime, &lastprobe, 1 * 1000000)){
+					idata.pending_write_f=TRUE;
+					continue;
+				}
 
-				exit(EXIT_FAILURE);
+				if(!donesending_f && idata.pending_write_f && FD_ISSET(idata.fd, &wset)){
+					idata.pending_write_f=FALSE;
+
+					/* XXX: SEND PROBE PACKET */
+
+					/* XXX: Will not happen, but still check in case code is changed */
+					if(sizeof(TP_LINK_IP_CAMERA_DISCOVER) > sizeof(sendbuff)){
+						puts("Internal buffer too short");
+						exit(EXIT_FAILURE);
+					}
+
+					nsendbuff= sizeof(TP_LINK_IP_CAMERA_DISCOVER);
+					memcpy(sendbuff, TP_LINK_IP_CAMERA_DISCOVER, nsendbuff);
+
+					if( sendto(idata.fd, sendbuff, nsendbuff, 0, (struct sockaddr *) &sockaddr_to, sizeof(sockaddr_to)) == -1){
+						perror("iot-scan: ");
+						exit(EXIT_FAILURE);
+					}
+
+					if(gettimeofday(&lastprobe, NULL) == -1){
+						if(idata.verbose_f)
+							perror("iot-scan");
+
+						exit(EXIT_FAILURE);
+					}
+
+					retrans++;
+
+					if(retrans >= idata.local_retrans)
+						donesending_f= 1;
+
+				}
+
+
+				if(FD_ISSET(idata.fd, &eset)){
+					if(idata.verbose_f)
+						puts("iot-scan: Found exception on descriptor");
+
+					exit(EXIT_FAILURE);
+				}
 			}
 		}
-}
-
 	}
 
 	exit(EXIT_SUCCESS);
@@ -752,10 +748,12 @@ void print_help(void){
     
 	puts("\nOPTIONS:\n"
 	     "  --interface, -i             Network interface\n"
-	     "  --dst-address, -d           IPv6 Destination Range or Prefix\n"
+	     "  --dst-address, -d           Destination Range or Prefix\n"
+	     "  --local-scan, -L            Scan the local subnet\n"
 	     "  --retrans, -x               Number of retransmissions of each probe\n"
 	     "  --timeout, -O               Timeout in seconds (default: 1 second)\n"
-	     "  --local-scan, -L            Scan the local subnet\n"
+	     "  --timeout, -O               Timeout in seconds (default: 1 second)\n"
+		 "  --type, -t                  Target device type\n"
 	     "  --help, -h                  Print help for the iot-scan tool\n"
 	     "  --verbose, -v               Be verbose\n"
 	     "\n"

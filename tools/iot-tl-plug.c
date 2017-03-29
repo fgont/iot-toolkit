@@ -501,16 +501,6 @@ int main(int argc, char **argv){
 					}
 				}
 
-				if(command != NULL){
-					printf("Command: #%s#\n", command);
-				}
-				if(arg1 != NULL){
-					printf("arg1: #%s#\n", arg1);
-				}
-				if(arg2 != NULL){
-					printf("arg2: #%s#\n", arg2);
-				}
-
 				if(command == NULL || !is_command_valid(command)){
 					puts("Invalid command");
 					exit(EXIT_FAILURE);
@@ -923,7 +913,7 @@ XXX This should later allow to just specify local scan and automatically choose 
 
 		/* XXX: SEND PROBE PACKET */
 		nsendbuff= Strnlen(sendbuff, MAX_TP_COMMAND_LENGTH);
-		printf("Comando sin encriptar: \n#%s#\n\n", sendbuff);
+/*		printf("Comando sin encriptar: \n#%s#\n\n", sendbuff);*/
 		tp_link_crypt((unsigned char *)sendbuff, nsendbuff);
 
 
@@ -1299,7 +1289,6 @@ XXX This should later allow to just specify local scan and automatically choose 
 	}
 
 	else if(json_f && proto_f && proto == IPPROTO_TCP){
-
 		/* XXX: SEND PROBE PACKET */
 		nsendbuff= Strnlen(json, MAX_TP_COMMAND_LENGTH);
 		if(nsendbuff > sizeof(sendbuff)){
@@ -1308,7 +1297,6 @@ XXX This should later allow to just specify local scan and automatically choose 
 		}
 
 		memcpy(sendbuff, json, nsendbuff);
-		printf("Comando sin encriptar: \n#%s#\n\n", sendbuff);
 		tp_link_crypt((unsigned char *)sendbuff, nsendbuff);
 
 
@@ -2072,22 +2060,33 @@ void usage(void){
 
 void print_help(void){
 	puts(SI6_TOOLKIT);
-	puts( "iot-tl-plug: An IoT scanning tool\n");
+	puts( "iot-tl-plug: A tool for TP-Link Smartplugs\n");
 	usage();
     
 	puts("\nOPTIONS:\n"
 	     "  --interface, -i             Network interface\n"
-	     "  --dst-address, -d           IPv6 Destination Range or Prefix\n"
-	     "  --retrans, -x               Number of retransmissions of each probe\n"
+	     "  --src-address, -s           IP Source Address\n"
+	     "  --dst-address, -d           IP Destination Address\n"
+		 "  --local, -L                 Target all devices in the local network\n"
+		 "  --src-port, -o              Transport Source Port\n"
+		 "  --dst-port, -a              Transport Destination Port\n"
+		 "  --command, -c               Smartplug Command\n"
+		 "  --json, -j                  JSON encoded command\n"
+		 "  --protocol, -P              Transport protocol {TCP, UDP}\n" 
+		 "  --ping-pong, -p             Ping-pong attack\n"
+		 "  --toggle, -T'               Toggle attack\n"
+		 "  --scan, -Z                  Scan for TP-Link Smart PLugs\n"
+	     "  --retrans, -x               Number of retransmissions of each packet\n"
 	     "  --timeout, -O               Timeout in seconds (default: 1 second)\n"
-	     "  --local-scan, -L            Scan the local subnet\n"
 	     "  --help, -h                  Print help for the iot-tl-plug tool\n"
 	     "  --verbose, -v               Be verbose\n"
 	     "\n"
-	     " Programmed by Fernando Gont for SI6 Networks <http://www.si6networks.com>\n"
+	     " Programmed by Fernando Gont for SI6 Networks <https://www.si6networks.com>\n"
 	     " Please send any bug reports to <fgont@si6networks.com>\n"
 	);
 }
+
+
 
 
 
@@ -2202,7 +2201,7 @@ void free_host_entries(struct host_list *hlist){
 /*
  * Function: is_command_valid()
  *
- * hecks whether the specified command existsReleases memory allocated for holding IPv6 addresses and Ethernet addresses
+ * Checks whether the specified command existsReleases memory allocated for holding IPv6 addresses and Ethernet addresses
  */
 
 unsigned int is_command_valid(char *command){
@@ -2218,112 +2217,4 @@ unsigned int is_command_valid(char *command){
 	return(FALSE);
 }
 
-/*
-{"system":{"reboot":{"delay":1}}}
 
-Reset (To Factory Settings)
-{"system":{"reset":{"delay":1}}}
-
-Turn On
-{"system":{"set_relay_state":{"state":1}}}
-
-Turn Off
-{"system":{"set_relay_state":{"state":0}}}
-
-Turn Off Device LED (Night mode)
-{"system":{"set_led_off":{"off":1}}}
-
-Set Device Alias
-{"system":{"set_dev_alias":{"alias":"supercool plug"}}}
-
-Set MAC Address
-{"system":{"set_mac_addr":{"mac":"50-C7-BF-01-02-03"}}}
-
-Set Device ID
-{"system":{"set_device_id":{"deviceId":"0123456789ABCDEF0123456789ABCDEF01234567"}}}
-
-Set Hardware ID
-{"system":{"set_hw_id":{"hwId":"0123456789ABCDEF0123456789ABCDEF"}}}
-
-Set Location
-{"system":{"set_dev_location":{"longitude":6.9582814,"latitude":50.9412784}}}
-
-Perform uBoot Bootloader Check
-{"system":{"test_check_uboot":null}}
-
-Get Device Icon
-{"system":{"get_dev_icon":null}}
-
-Set Device Icon
-{"system":{"set_dev_icon":{"icon":"xxxx","hash":"ABCD"}}}
-
-Set Test Mode (command only accepted coming from IP 192.168.1.100)
-{"system":{"set_test_mode":{"enable":1}}}
-
-Download Firmware from URL
-{"system":{"download_firmware":{"url":"http://...."}}}
-
-Get Download State
-{"system":{"get_download_state":{}}}
-
-Flash Downloaded Firmware
-{"system":{"flash_firmware":{}}}
-
-Check Config
-{"system":{"check_new_config":null}}Reboot
-{"system":{"reboot":{"delay":1}}}
-
-Reset (To Factory Settings)
-{"system":{"reset":{"delay":1}}}
-
-Turn On
-{"system":{"set_relay_state":{"state":1}}}
-
-Turn Off
-{"system":{"set_relay_state":{"state":0}}}
-
-Turn Off Device LED (Night mode)
-{"system":{"set_led_off":{"off":1}}}
-
-Set Device Alias
-{"system":{"set_dev_alias":{"alias":"supercool plug"}}}
-
-Set MAC Address
-{"system":{"set_mac_addr":{"mac":"50-C7-BF-01-02-03"}}}
-
-Set Device ID
-{"system":{"set_device_id":{"deviceId":"0123456789ABCDEF0123456789ABCDEF01234567"}}}
-
-Set Hardware ID
-{"system":{"set_hw_id":{"hwId":"0123456789ABCDEF0123456789ABCDEF"}}}
-
-Set Location
-{"system":{"set_dev_location":{"longitude":6.9582814,"latitude":50.9412784}}}
-
-Perform uBoot Bootloader Check
-{"system":{"test_check_uboot":null}}
-
-Get Device Icon
-{"system":{"get_dev_icon":null}}
-
-Set Device Icon
-{"system":{"set_dev_icon":{"icon":"xxxx","hash":"ABCD"}}}
-
-Set Test Mode (command only accepted coming from IP 192.168.1.100)
-{"system":{"set_test_mode":{"enable":1}}}
-
-Download Firmware from URL
-{"system":{"download_firmware":{"url":"http://...."}}}
-
-Get Download State
-{"system":{"get_download_state":{}}}
-
-Flash Downloaded Firmware
-{"system":{"flash_firmware":{}}}
-
-Check Config
-{"system":{"check_new_config":null}}	
-
-}
-
-*/

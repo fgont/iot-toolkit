@@ -78,8 +78,9 @@ union my6_addr{
 /* Steps into which results will be printed */
 #define MAX_STEPS	20
 
-#define SMART_PLUGS	0x00000001
-#define IP_CAMERAS	0x00000002
+#define SCAN_SMART_PLUGS	0x00000001
+#define SCAN_IP_CAMERAS		0x00000002
+#define SCAN_ALL			(SCAN_SMART_PLUGS | SCAN_IP_CAMERAS)
 
 
 char 					TP_LINK_SMART_DISCOVER[]="{\"system\":{\"get_sysinfo\":null},\"emeter\":{\"get_realtime\":null}}";
