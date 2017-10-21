@@ -57,27 +57,29 @@
 /* #define DEBUG */
 
 /* Function prototypes */
-void				init_packet_data(struct iface_data *);
-void				free_host_entries(struct host_list *);
-int					host_scan_local(pcap_t *, struct iface_data *, struct in6_addr *, unsigned char, \
-									struct host_entry *);
 void				print_help(void);
-int					print_host_entries(struct host_list *, unsigned char);
-void				local_sig_alarm(int);
 void				usage(void);
 int					process_config_file(const char *);
 
-/* Used for multiscan */
-struct host_list			host_local, host_global, host_candidate;
-struct host_entry			*host_locals[MAX_IPV6_ENTRIES], *host_globals[MAX_IPV6_ENTRIES];
-struct host_entry			*host_candidates[MAX_IPV6_ENTRIES];
+
+struct nodes{
+	unsigned int	max;
+	unsigned int	n;
+	struct in_addr  *node;
+};
+
+unsigned int 		create_local_nodes(struct nodes *);
+void				destroy_local_nodes(struct nodes *);
+void				add_to_local_nodes(struct nodes *, struct in_addr *);
+unsigned int		is_in_local_nodes(struct nodes *, struct in_addr *);
+
+
 
 /* Used for router discovery */
 struct iface_data			idata;
 
 /* Variables used for learning the default router */
 struct ether_addr			router_ether, rs_ether;
-struct in6_addr				router_ipv6, rs_ipv6;
 
 struct in6_addr				randprefix;
 unsigned char				randpreflen;
@@ -130,7 +132,8 @@ int						sel;
 fd_set					sset, rset, wset, eset;
 struct timeval			curtime, pcurtime, lastprobe;
 struct tm				pcurtimetm;
-unsigned int			retrans=0;
+
+unsigned int			retrans;
 
 int main(int argc, char **argv){
 	extern char				*optarg;
@@ -145,6 +148,12 @@ int main(int argc, char **argv){
 	struct json				*json1, *json2, *json3;
 	struct json_value		json_value;
 	char					*alias, *dev_name, *type, *model;
+	struct nodes			nodes;
+
+	char edimax_man[EDIMAX_MAN_LEN+1], edimax_model[EDIMAX_MOD_LEN+1], edimax_version[EDIMAX_VER_LEN+1], edimax_display[EDIMAX_DIS_LEN+1];
+	struct edimax_discover_response *edimax;
+
+	unsigned long			rx_timer=500000;
 
 	static struct option longopts[] = {
 		{"interface", required_argument, 0, 'i'},
@@ -170,7 +179,7 @@ int main(int argc, char **argv){
 	srandom(time(NULL));
 
 	init_iface_data(&idata);
-
+	idata.local_retrans=2;
 
 	while((r=getopt_long(argc, argv, shortopts, longopts, NULL)) != -1) {
 		option= r;
@@ -303,9 +312,7 @@ int main(int argc, char **argv){
 	}
 
 	if(!dst_f && !scan_local_f){
-		if(idata.verbose_f)
-			puts("Must specify either a destination prefix ('-d'), or a local scan ('-L')");
-
+		puts("Must specify either a destination prefix ('-d'), or a local scan ('-L')");
 		exit(EXIT_FAILURE);
 	}
 
@@ -323,10 +330,6 @@ int main(int argc, char **argv){
 	}
 
 	if(scan_local_f){
-		host_local.nhosts=0;
-		host_local.maxhosts= MAX_IPV6_ENTRIES;
-		host_local.host= host_locals;
-
 		/* If an interface was specified, we select an IPv4 address from such interface */
 		if(idata.iface_f){
 			if( (voidptr=find_v4addr_for_iface(&(idata.iflist), idata.iface)) == NULL){
@@ -365,7 +368,15 @@ int main(int argc, char **argv){
 			exit(EXIT_FAILURE);
 		}
 
+
+		/* TP-Link Smart plugs */
 		if(scan_type | SCAN_SMART_PLUGS){
+			retrans=0;
+			if(!create_local_nodes(&nodes)){
+				puts("Not enough memory");
+				exit(EXIT_FAILURE);
+			}
+
 			memset(&sockaddr_to, 0, sizeof(sockaddr_to));
 			sockaddr_to.sin_family= AF_INET;
 			sockaddr_to.sin_port= htons(TP_LINK_SMART_PORT);
@@ -397,8 +408,8 @@ int main(int argc, char **argv){
 
 				if(!donesending_f){
 					/* This is the retransmission timer */
-					timeout.tv_sec= 1;
-					timeout.tv_usec= 0;
+					timeout.tv_sec=  rx_timer/1000000;
+					timeout.tv_usec= rx_timer%1000000;
 				}
 				else{
 					/* XXX: This should use the parameter from command line */
@@ -447,6 +458,7 @@ int main(int argc, char **argv){
 						exit(EXIT_FAILURE);
 					}
 
+
 					if(inet_ntop(AF_INET, &(sockaddr_from.sin_addr), pv4addr, sizeof(pv4addr)) == NULL){
 						perror("iot-scan: ");
 						exit(EXIT_FAILURE);
@@ -479,18 +491,19 @@ int main(int argc, char **argv){
 											alias=json_value.value;
 										}	
 
-										printf("%s # %s: TP-Link %s: %s: \"%s\"\n", pv4addr, type, model, dev_name, alias);
-		
+										if( !is_in_local_nodes(&nodes, &(sockaddr_from.sin_addr))){
+											add_to_local_nodes(&nodes, &(sockaddr_from.sin_addr));
+											printf("%s # %s: TP-Link %s: %s: \"%s\"\n", pv4addr, type, model, dev_name, alias);
+										}
 									}
 								}
 							}
 						}
 					}
-
 				}
 
 
-				if(!donesending_f && !idata.pending_write_f && is_time_elapsed(&curtime, &lastprobe, 1 * 1000000)){
+				if(!donesending_f && !idata.pending_write_f && is_time_elapsed(&curtime, &lastprobe, rx_timer)){
 					idata.pending_write_f=TRUE;
 					continue;
 				}
@@ -530,8 +543,195 @@ int main(int argc, char **argv){
 					exit(EXIT_FAILURE);
 				}
 			}
+
+			destroy_local_nodes(&nodes);
 		}
+
+
+		/* Edimax SmartPLugs */
+		if(scan_type | SCAN_SMART_PLUGS){
+			retrans=0;
+
+			if(!create_local_nodes(&nodes)){
+				puts("Not enough memory");
+				exit(EXIT_FAILURE);
+			}
+
+			donesending_f=FALSE;
+			end_f=FALSE;
+			memset(&sockaddr_to, 0, sizeof(sockaddr_to));
+			sockaddr_to.sin_family= AF_INET;
+			sockaddr_to.sin_port= htons(EDIMAX_SMART_PLUG_SERVICE_PORT);
+
+			memset(&sockaddr_from, 0, sizeof(sockaddr_from));
+			sockaddr_from.sin_family= AF_INET;
+			sockaddrfrom_len=sizeof(sockaddr_from);
+
+
+			if ( inet_pton(AF_INET, IP_LIMITED_MULTICAST, &(sockaddr_to.sin_addr)) <= 0){
+				puts("inet_pton(): Error setting multicast address");
+				exit(EXIT_FAILURE);
+			}
+
+			FD_ZERO(&sset);
+			FD_SET(idata.fd, &sset);
+
+			lastprobe.tv_sec= 0;	
+			lastprobe.tv_usec=0;
+			idata.pending_write_f=TRUE;	
+
+			/* The end_f flag is set after the last probe has been sent and a timeout period has elapsed.
+			   That is, we give responses enough time to come back
+			 */
+			while(!end_f){
+				rset= sset;
+				wset= sset;
+				eset= sset;
+
+				if(!donesending_f){
+					/* This is the retransmission timer */
+					timeout.tv_sec=  rx_timer/1000000;
+					timeout.tv_usec= rx_timer%1000000;
+				}
+				else{
+					/* XXX: This should use the parameter from command line */
+					timeout.tv_sec= idata.local_timeout;
+					timeout.tv_usec=0;
+				}
+
+				/*
+					Check for readability and exceptions. We only check for writeability if there is pending data
+					to send.
+				 */
+				if((sel=select(idata.fd+1, &rset, (idata.pending_write_f?&wset:NULL), &eset, &timeout)) == -1){
+					if(errno == EINTR){
+						continue;
+					}
+					else{
+						perror("iot-scan:");
+						exit(EXIT_FAILURE);
+					}
+				}
+
+				if(gettimeofday(&curtime, NULL) == -1){
+					if(idata.verbose_f)
+						perror("iot-scan");
+
+					exit(EXIT_FAILURE);
+				}
+
+				/* Check whether we have finished probing all targets */
+				if(donesending_f){
+					/*
+					   Just wait for SELECT_TIMEOUT seconds for any incoming responses.
+					*/
+
+					if(is_time_elapsed(&curtime, &lastprobe, idata.local_timeout * 1000000)){
+						end_f=TRUE;
+					}
+				}
+
+
+				if(sel && FD_ISSET(idata.fd, &rset)){
+					/* XXX: Process response packet */
+
+					if( (nreadbuff = recvfrom(idata.fd, readbuff, sizeof(readbuff), 0, (struct sockaddr *)&sockaddr_from, &sockaddrfrom_len)) == -1){
+						perror("iot-scan: ");
+						exit(EXIT_FAILURE);
+					}
+
+					if( nreadbuff == sizeof(struct edimax_discover_response)){
+						if( !is_in_local_nodes(&nodes, &(sockaddr_from.sin_addr))){
+							add_to_local_nodes(&nodes, &(sockaddr_from.sin_addr));
+
+							if(inet_ntop(AF_INET, &(sockaddr_from.sin_addr), pv4addr, sizeof(pv4addr)) == NULL){
+								perror("iot-scan: ");
+								exit(EXIT_FAILURE);
+							}
+
+							edimax= (struct edimax_discover_response *) readbuff;
+
+							strncpy(edimax_man, edimax->manufacturer, EDIMAX_MAN_LEN);
+							edimax_man[EDIMAX_MAN_LEN]=0;
+
+							strncpy(edimax_model, edimax->model, EDIMAX_MOD_LEN);
+							edimax_model[EDIMAX_MOD_LEN]=0;
+
+							strncpy(edimax_version, edimax->version, EDIMAX_VER_LEN);
+							edimax_version[EDIMAX_VER_LEN]=0;
+
+							strncpy(edimax_display, edimax->displayname, EDIMAX_DIS_LEN);
+							edimax_display[EDIMAX_DIS_LEN]=0;
+
+							printf("%s # smartplug: %s %s %s: \"%s\"\n", pv4addr, edimax_man, edimax_model, edimax_version, edimax_display);
+						}
+					}
+
+				}
+
+
+				if(!donesending_f && !idata.pending_write_f && is_time_elapsed(&curtime, &lastprobe, rx_timer)){
+					idata.pending_write_f=TRUE;
+					continue;
+				}
+
+				if(!donesending_f && idata.pending_write_f && FD_ISSET(idata.fd, &wset)){
+					idata.pending_write_f=FALSE;
+
+					/* XXX: SEND PROBE PACKET */
+
+					/* XXX: Will not happen, but still check in case code is changed */
+					if(sizeof(GENIUS_IP_CAMERA_DISCOVER) > sizeof(sendbuff)){
+						puts("Internal buffer too short");
+						exit(EXIT_FAILURE);
+					}
+
+					nsendbuff= sizeof(EDIMAX_SMART_PLUG_DISCOVER);
+					memcpy(sendbuff, EDIMAX_SMART_PLUG_DISCOVER, nsendbuff);
+
+					if( sendto(idata.fd, sendbuff, nsendbuff, 0, (struct sockaddr *) &sockaddr_to, sizeof(sockaddr_to)) == -1){
+						perror("iot-scan: ");
+						exit(EXIT_FAILURE);
+					}
+
+					if(gettimeofday(&lastprobe, NULL) == -1){
+						if(idata.verbose_f)
+							perror("iot-scan");
+
+						exit(EXIT_FAILURE);
+					}
+
+					retrans++;
+
+					if(retrans >= idata.local_retrans)
+						donesending_f= 1;
+
+				}
+
+
+				if(FD_ISSET(idata.fd, &eset)){
+					if(idata.verbose_f)
+						puts("iot-scan: Found exception on descriptor");
+
+					exit(EXIT_FAILURE);
+				}
+			}
+
+			destroy_local_nodes(&nodes);
+		}
+
+
+
+
+		/* TP-Link IP Cameras */
 		if(scan_type | SCAN_IP_CAMERAS){
+			retrans=0;
+
+			if(!create_local_nodes(&nodes)){
+				puts("Not enough memory");
+				exit(EXIT_FAILURE);
+			}
+
 			donesending_f=FALSE;
 			end_f=FALSE;
 			memset(&sockaddr_to, 0, sizeof(sockaddr_to));
@@ -565,8 +765,170 @@ int main(int argc, char **argv){
 
 				if(!donesending_f){
 					/* This is the retransmission timer */
-					timeout.tv_sec= 1;
-					timeout.tv_usec= 0;
+					timeout.tv_sec=  rx_timer/1000000;
+					timeout.tv_usec= rx_timer%1000000;
+				}
+				else{
+					/* XXX: This should use the parameter from command line */
+					timeout.tv_sec= idata.local_timeout;
+					timeout.tv_usec=0;
+				}
+
+				/*
+					Check for readability and exceptions. We only check for writeability if there is pending data
+					to send.
+				 */
+				if((sel=select(idata.fd+1, &rset, (idata.pending_write_f?&wset:NULL), &eset, &timeout)) == -1){
+					if(errno == EINTR){
+						continue;
+					}
+					else{
+						perror("iot-scan:");
+						exit(EXIT_FAILURE);
+					}
+				}
+
+				if(gettimeofday(&curtime, NULL) == -1){
+					if(idata.verbose_f)
+						perror("iot-scan");
+
+					exit(EXIT_FAILURE);
+				}
+
+				/* Check whether we have finished probing all targets */
+				if(donesending_f){
+					/*
+					   Just wait for SELECT_TIMEOUT seconds for any incoming responses.
+					*/
+
+					if(is_time_elapsed(&curtime, &lastprobe, idata.local_timeout * 1000000)){
+						end_f=TRUE;
+					}
+				}
+
+
+				if(sel && FD_ISSET(idata.fd, &rset)){
+					/* XXX: Process response packet */
+
+					if( (nreadbuff = recvfrom(idata.fd, readbuff, sizeof(readbuff), 0, (struct sockaddr *)&sockaddr_from, &sockaddrfrom_len)) == -1){
+						perror("iot-scan: ");
+						exit(EXIT_FAILURE);
+					}
+
+
+					if(inet_ntop(AF_INET, &(sockaddr_from.sin_addr), pv4addr, sizeof(pv4addr)) == NULL){
+						perror("iot-scan: ");
+						exit(EXIT_FAILURE);
+					}
+
+					/* Compare response with known one */
+					if(nreadbuff == sizeof(TP_LINK_IP_CAMERA_RESPONSE)){
+						if(memcmp(readbuff, TP_LINK_IP_CAMERA_RESPONSE, nreadbuff) == 0){
+							if( !is_in_local_nodes(&nodes, &(sockaddr_from.sin_addr))){
+								add_to_local_nodes(&nodes, &(sockaddr_from.sin_addr));
+								printf("%s # camera: TP-Link IP camera\n", pv4addr);
+							}
+						}
+					}
+
+				}
+
+
+				if(!donesending_f && !idata.pending_write_f && is_time_elapsed(&curtime, &lastprobe, rx_timer)){
+					idata.pending_write_f=TRUE;
+					continue;
+				}
+
+				if(!donesending_f && idata.pending_write_f && FD_ISSET(idata.fd, &wset)){
+					idata.pending_write_f=FALSE;
+
+					/* XXX: SEND PROBE PACKET */
+
+					/* XXX: Will not happen, but still check in case code is changed */
+					if(sizeof(TP_LINK_IP_CAMERA_DISCOVER) > sizeof(sendbuff)){
+						puts("Internal buffer too short");
+						exit(EXIT_FAILURE);
+					}
+
+					nsendbuff= sizeof(TP_LINK_IP_CAMERA_DISCOVER);
+					memcpy(sendbuff, TP_LINK_IP_CAMERA_DISCOVER, nsendbuff);
+
+					if( sendto(idata.fd, sendbuff, nsendbuff, 0, (struct sockaddr *) &sockaddr_to, sizeof(sockaddr_to)) == -1){
+						perror("iot-scan: ");
+						exit(EXIT_FAILURE);
+					}
+
+					if(gettimeofday(&lastprobe, NULL) == -1){
+						if(idata.verbose_f)
+							perror("iot-scan");
+
+						exit(EXIT_FAILURE);
+					}
+
+					retrans++;
+
+					if(retrans >= idata.local_retrans)
+						donesending_f= 1;
+
+				}
+
+
+				if(FD_ISSET(idata.fd, &eset)){
+					if(idata.verbose_f)
+						puts("iot-scan: Found exception on descriptor");
+
+					exit(EXIT_FAILURE);
+				}
+			}
+
+			destroy_local_nodes(&nodes);
+		}
+
+
+		/* Genius IP cameras */
+		if(scan_type | SCAN_IP_CAMERAS){
+			retrans=0;
+
+			if(!create_local_nodes(&nodes)){
+				puts("Not enough memory");
+				exit(EXIT_FAILURE);
+			}
+
+			donesending_f=FALSE;
+			end_f=FALSE;
+			memset(&sockaddr_to, 0, sizeof(sockaddr_to));
+			sockaddr_to.sin_family= AF_INET;
+			sockaddr_to.sin_port= htons(GENIUS_IP_CAMERA_SERVICE_PORT);
+
+			memset(&sockaddr_from, 0, sizeof(sockaddr_from));
+			sockaddr_from.sin_family= AF_INET;
+			sockaddrfrom_len=sizeof(sockaddr_from);
+
+
+			if ( inet_pton(AF_INET, IP_LIMITED_MULTICAST, &(sockaddr_to.sin_addr)) <= 0){
+				puts("inet_pton(): Error setting multicast address");
+				exit(EXIT_FAILURE);
+			}
+
+			FD_ZERO(&sset);
+			FD_SET(idata.fd, &sset);
+
+			lastprobe.tv_sec= 0;	
+			lastprobe.tv_usec=0;
+			idata.pending_write_f=TRUE;	
+
+			/* The end_f flag is set after the last probe has been sent and a timeout period has elapsed.
+			   That is, we give responses enough time to come back
+			 */
+			while(!end_f){
+				rset= sset;
+				wset= sset;
+				eset= sset;
+
+				if(!donesending_f){
+					/* This is the retransmission timer */
+					timeout.tv_sec=  rx_timer/1000000;
+					timeout.tv_usec= rx_timer%1000000;
 				}
 				else{
 					/* XXX: This should use the parameter from command line */
@@ -621,16 +983,16 @@ int main(int argc, char **argv){
 						exit(EXIT_FAILURE);
 					}
 
-					/* Compare response with known one */
-					if(nreadbuff == sizeof(TP_LINK_IP_CAMERA_RESPONSE)){
-						if(memcmp(readbuff, TP_LINK_IP_CAMERA_RESPONSE, nreadbuff) == 0){
-							printf("%s # camera: TP-Link IP camera\n", pv4addr);
+					if(nreadbuff == sizeof(GENIUS_IP_CAMERA_RESPONSE) && ntohs(sockaddr_from.sin_port) == GENIUS_IP_CAMERA_SENDING_PORT){
+						if( !is_in_local_nodes(&nodes, &(sockaddr_from.sin_addr))){
+							add_to_local_nodes(&nodes, &(sockaddr_from.sin_addr));
+							printf("%s # camera: Genius IP camera\n", pv4addr);
 						}
 					}
 				}
 
 
-				if(!donesending_f && !idata.pending_write_f && is_time_elapsed(&curtime, &lastprobe, 1 * 1000000)){
+				if(!donesending_f && !idata.pending_write_f && is_time_elapsed(&curtime, &lastprobe, rx_timer)){
 					idata.pending_write_f=TRUE;
 					continue;
 				}
@@ -641,13 +1003,13 @@ int main(int argc, char **argv){
 					/* XXX: SEND PROBE PACKET */
 
 					/* XXX: Will not happen, but still check in case code is changed */
-					if(sizeof(TP_LINK_IP_CAMERA_DISCOVER) > sizeof(sendbuff)){
+					if(sizeof(GENIUS_IP_CAMERA_DISCOVER) > sizeof(sendbuff)){
 						puts("Internal buffer too short");
 						exit(EXIT_FAILURE);
 					}
 
-					nsendbuff= sizeof(TP_LINK_IP_CAMERA_DISCOVER);
-					memcpy(sendbuff, TP_LINK_IP_CAMERA_DISCOVER, nsendbuff);
+					nsendbuff= sizeof(GENIUS_IP_CAMERA_DISCOVER);
+					memcpy(sendbuff, GENIUS_IP_CAMERA_DISCOVER, nsendbuff);
 
 					if( sendto(idata.fd, sendbuff, nsendbuff, 0, (struct sockaddr *) &sockaddr_to, sizeof(sockaddr_to)) == -1){
 						perror("iot-scan: ");
@@ -676,7 +1038,10 @@ int main(int argc, char **argv){
 					exit(EXIT_FAILURE);
 				}
 			}
+
+			destroy_local_nodes(&nodes);
 		}
+
 	}
 
 	exit(EXIT_SUCCESS);
@@ -752,7 +1117,6 @@ void print_help(void){
 	     "  --local-scan, -L            Scan the local subnet\n"
 	     "  --retrans, -x               Number of retransmissions of each probe\n"
 	     "  --timeout, -O               Timeout in seconds (default: 1 second)\n"
-	     "  --timeout, -O               Timeout in seconds (default: 1 second)\n"
 		 "  --type, -t                  Target device type\n"
 	     "  --help, -h                  Print help for the iot-scan tool\n"
 	     "  --verbose, -v               Be verbose\n"
@@ -765,108 +1129,74 @@ void print_help(void){
 
 
 /*
- * Function: print_host_entries()
+ * Function: create_local_nodes()
  *
- * Prints the IPv6 addresses (and optionally the Ethernet addresses) in a list
+ * Creates structure for discarding duplicate nodes
  */
 
-int print_host_entries(struct host_list *hlist, unsigned char flag){
-	unsigned int i;
+unsigned int create_local_nodes(struct nodes *nodes){
+#define MAX_LOCAL_NODES 65535
 
-	for(i=0; i < (hlist->nhosts); i++){
-		if(inet_ntop(AF_INET6, &((hlist->host[i])->ip6), pv6addr, sizeof(pv6addr)) == NULL){
-			if(verbose_f>1)
-				puts("inet_ntop(): Error converting IPv6 address to presentation format");
+	nodes->max= MAX_LOCAL_NODES;
+	nodes->n=0;
 
-			return(-1);
-		}
+	if( (nodes->node= malloc(sizeof(struct in_addr) * MAX_LOCAL_NODES)) == NULL)
+		return FALSE;
 
-		if(flag == PRINT_ETHER_ADDR){
-			if(ether_ntop( &((hlist->host[i])->ether), plinkaddr, sizeof(plinkaddr)) == 0){
-				if(verbose_f>1)
-					puts("ether_ntop(): Error converting address");
-
-				return(-1);
-			}
-
-			printf("%s @ %s\n", pv6addr, plinkaddr);
-		}
-		else
-			printf("%s\n", pv6addr);
-	}
-
-	return 0;
+	return TRUE;
 }
 
 
-
 /*
- * Function: print_unique_host_entries()
+ * Function: destroy_local_nodes()
  *
- * Prints only one IPv6 address (and optionally the Ethernet addresses) per Ethernet 
- * address in a list.
+ * Destroys structure for discarding duplicate nodes
  */
 
-int print_unique_host_entries(struct host_list *hlist, unsigned char flag){
-	unsigned int i, j, k;
+void destroy_local_nodes(struct nodes *nodes){
+#define MAX_LOCAL_NODES 65535
 
-	for(i=0; i < (hlist->nhosts); i++){
-
-		if(i){
-			for(j=0; j < i; j++){
-				for(k=0; k < ETH_ALEN; k++){
-					if((hlist->host[i])->ether.a[k] != (hlist->host[j])->ether.a[k])
-						break;
-				}
-
-				if(k == ETH_ALEN)
-					break;
-			}			
-
-			if(j < i)
-				continue;
-		}
-			
-		if(inet_ntop(AF_INET6, &((hlist->host[i])->ip6), pv6addr, sizeof(pv6addr)) == NULL){
-			if(verbose_f>1)
-				puts("inet_ntop(): Error converting IPv6 address to presentation format");
-
-			return(-1);
-		}
-
-		if(flag == PRINT_ETHER_ADDR){
-			if(ether_ntop( &((hlist->host[i])->ether), plinkaddr, sizeof(plinkaddr)) == 0){
-				if(verbose_f>1)
-					puts("ether_ntop(): Error converting address");
-
-				return(-1);
-			}
-
-			printf("%s @ %s\n", pv6addr, plinkaddr);
-		}
-		else
-			printf("%s\n", pv6addr);
-	}
-
-	return 0;
-}
-
-
-
-/*
- * Function: free_host_entries()
- *
- * Releases memory allocated for holding IPv6 addresses and Ethernet addresses
- */
-
-void free_host_entries(struct host_list *hlist){
-	unsigned int i;
-
-	for(i=0; i< hlist->nhosts; i++)
-		free(hlist->host[i]);
-
-	hlist->nhosts=0;	/* Set the number of entries to 0, to reflect the released memory */
+	nodes->max=0;
+	nodes->n=0;
+	free(nodes->node);
 	return;
+}
+
+
+/*
+ * Function: add_to_local_nodes()
+ *
+ * Adds node to structure of local nodes
+ */
+
+void add_to_local_nodes(struct nodes *nodes, struct in_addr *node){
+	if(nodes->n >= nodes->max)
+		return;
+
+	if(nodes->node == NULL)
+		return;
+
+	nodes->node[nodes->n]= *node;
+	(nodes->n)++;
+	return;
+}
+
+
+/*
+ * Function: is_in_local_nodes()
+ *
+ * Check if node is in list of local nodes
+ */
+
+unsigned int is_in_local_nodes(struct nodes *nodes, struct in_addr *node){
+	unsigned int i;
+
+	for(i=0; i < nodes->n; i++){
+		if( nodes->node[i].s_addr == node->s_addr)
+			return TRUE;
+	}
+
+	return FALSE;
 }
 
 
